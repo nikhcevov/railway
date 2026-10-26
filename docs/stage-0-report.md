@@ -53,12 +53,32 @@ mod set: the cart held **0.598 blocks/tick (≈11.96 blocks/s)** while a passeng
 was mounted. The prototype was reverted; stage 3 will reintroduce it gated to
 carts tagged by Railway.
 
+## Turnout shape probe
+
+A three-way junction was built on the dev world with a normal rail at the
+junction and branches west, east and south. Setting the junction state to
+`shape=south_west` (west+south) or `shape=south_east` (east+south) selected the
+branch as intended. The selected shape survived:
+
+- replacing the support block below with a redstone block and back;
+- removing and restoring the east branch rail;
+- powering an adjacent lever.
+
+Ordinary redstone does not toggle normal rails, and the tested neighbor updates
+did not flip the selected shape. One caveat: `setblock` reported failure on one
+shape write even though the block ended in the requested state, so stage 2 must
+re-read the state after every write instead of trusting the command/API result.
+
+This makes a turnout model of "Railway writes and verifies the rail shape, then
+locks the conflict zone" viable. Cart traversal through a curve/turnout and
+client smoothness are still unverified.
+
 ## Not yet verified
 
-- Curves, slopes and switchable T-junctions: the stage-1 validator rejects them.
-  Their vanilla geometry/redstone semantics must be documented while stage 2 is
-  implemented; no speed or control promise is made yet.
-- Client verification under the production mod set (parity run) is pending.
+- Curves, slopes and turnout traversal: the stage-1 validator rejects them.
+  Stage 2 must implement and test them; no speed or control promise is made yet.
+- Client verification under the production mod set (parity run). The modded dev
+  server is available for that check.
 
 ## Known limitations / decisions
 
