@@ -19,7 +19,7 @@ import dev.nikhcevov.railway.minecraft.Railway;
 import dev.nikhcevov.railway.minecraft.ScanService;
 import dev.nikhcevov.railway.minecraft.TripService;
 import dev.nikhcevov.railway.network.RailKind;
-import dev.nikhcevov.railway.network.RailProbe;
+import dev.nikhcevov.railway.network.GraphRailView;
 import dev.nikhcevov.railway.network.GraphRoutePlan;
 import dev.nikhcevov.railway.network.RailGraph;
 import dev.nikhcevov.railway.network.RailGraphPlanner;
@@ -159,7 +159,7 @@ public final class RailCommand {
 		}
 		ServerLevel level = player.level();
 		RailWorld world = new RailWorld(level);
-		RailProbe probe = world.probe(dock);
+		GraphRailView.Probe probe = world.graphProbe(dock);
 		Failure dockFailure = dockFailure(probe, dock);
 		if (dockFailure != null) {
 			return fail(context.getSource(), dockFailure);
@@ -234,7 +234,7 @@ public final class RailCommand {
 			return fail(context.getSource(), Failure.detail(FailureCode.WORLD_NOT_LOADED, station.dimension()));
 		}
 		RailWorld world = new RailWorld(level);
-		Failure dockFailure = dockFailure(world.probe(station.dock()), station.dock());
+		Failure dockFailure = dockFailure(world.graphProbe(station.dock()), station.dock());
 		if (dockFailure != null) {
 			return fail(context.getSource(), dockFailure);
 		}
@@ -314,7 +314,7 @@ public final class RailCommand {
 		ServerLevel level = RailWorld.level(source.getServer(), station.dimension());
 		if (level != null) {
 			RailWorld world = new RailWorld(level);
-			RailProbe probe = world.probe(station.dock());
+			GraphRailView.Probe probe = world.graphProbe(station.dock());
 			Failure dockProblem = dockFailure(probe, station.dock());
 			if (dockProblem != null) {
 				source.sendSuccess(() -> Messages.text(source, "station.info.problem",
@@ -705,18 +705,18 @@ public final class RailCommand {
 		return target.get();
 	}
 
-	private static Failure dockFailure(RailProbe probe, BlockLocation dock) {
-		if (probe instanceof RailProbe.Unloaded) {
+	private static Failure dockFailure(GraphRailView.Probe probe, BlockLocation dock) {
+		if (probe instanceof GraphRailView.Probe.Unloaded) {
 			return Failure.at(FailureCode.WORLD_NOT_LOADED, dock);
 		}
-		if (!(probe instanceof RailProbe.Rail rail)) {
+		if (!(probe instanceof GraphRailView.Probe.Rail rail)) {
 			return Failure.at(FailureCode.NO_RAIL, dock);
 		}
-		if (!rail.info().straight() || rail.info().slope()) {
+		if (!rail.shape().isStraightHorizontal()) {
 			return Failure.at(FailureCode.UNSUPPORTED_GEOMETRY, dock);
 		}
-		if (rail.info().kind() == RailKind.DETECTOR || rail.info().kind() == RailKind.ACTIVATOR) {
-			return Failure.at(FailureCode.UNSUPPORTED_RAIL, dock, rail.info().kind().name().toLowerCase(Locale.ROOT));
+		if (rail.kind() == RailKind.DETECTOR || rail.kind() == RailKind.ACTIVATOR) {
+			return Failure.at(FailureCode.UNSUPPORTED_RAIL, dock, rail.kind().name().toLowerCase(Locale.ROOT));
 		}
 		return null;
 	}

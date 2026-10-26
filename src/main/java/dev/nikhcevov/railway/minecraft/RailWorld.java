@@ -3,15 +3,10 @@ package dev.nikhcevov.railway.minecraft;
 import dev.nikhcevov.railway.domain.BlockLocation;
 import dev.nikhcevov.railway.domain.Failure;
 import dev.nikhcevov.railway.domain.FailureCode;
-import dev.nikhcevov.railway.domain.RailAxis;
-import dev.nikhcevov.railway.domain.RoutePlan;
 import dev.nikhcevov.railway.network.GraphRailView;
 import dev.nikhcevov.railway.network.GraphRoutePlan;
-import dev.nikhcevov.railway.network.RailInfo;
 import dev.nikhcevov.railway.network.RailKind;
-import dev.nikhcevov.railway.network.RailProbe;
 import dev.nikhcevov.railway.network.RailShapeType;
-import dev.nikhcevov.railway.network.RailView;
 import dev.nikhcevov.railway.network.RouteStep;
 import dev.nikhcevov.railway.network.SwitchRequirement;
 
@@ -37,7 +32,7 @@ import java.util.Set;
 import java.util.UUID;
 
 /** Minecraft adapter for rails, exits, dock occupancy and route readiness. */
-public final class RailWorld implements RailView, GraphRailView {
+public final class RailWorld implements GraphRailView {
 	private static final Set<Block> HAZARDS = Set.of(
 			Blocks.LAVA, Blocks.FIRE, Blocks.SOUL_FIRE, Blocks.MAGMA_BLOCK,
 			Blocks.CAMPFIRE, Blocks.SOUL_CAMPFIRE, Blocks.POWDER_SNOW,
@@ -67,29 +62,6 @@ public final class RailWorld implements RailView, GraphRailView {
 
 	public ServerLevel level() {
 		return level;
-	}
-
-	@Override
-	public RailProbe probe(BlockLocation location) {
-		BlockPos pos = pos(location);
-		if (!level.isLoaded(pos)) {
-			return RailProbe.unloaded();
-		}
-		BlockState state = level.getBlockState(pos);
-		if (!BaseRailBlock.isRail(state)) {
-			return RailProbe.empty();
-		}
-		RailShape shape = state.getValue(((BaseRailBlock) state.getBlock()).getShapeProperty());
-		RailAxis axis = switch (shape) {
-			case NORTH_SOUTH, ASCENDING_NORTH, ASCENDING_SOUTH -> RailAxis.Z;
-			case EAST_WEST, ASCENDING_EAST, ASCENDING_WEST -> RailAxis.X;
-			default -> null;
-		};
-		boolean straight = switch (shape) {
-			case NORTH_SOUTH, EAST_WEST, ASCENDING_NORTH, ASCENDING_SOUTH, ASCENDING_EAST, ASCENDING_WEST -> true;
-			default -> false;
-		};
-		return RailProbe.rail(new RailInfo(axis, kindOf(state), straight, shape.isSlope()));
 	}
 
 	@Override
@@ -321,87 +293,6 @@ public final class RailWorld implements RailView, GraphRailView {
 		AABB box = new AABB(pos.getX() + 0.1, pos.getY(), pos.getZ() + 0.1,
 				pos.getX() + 0.9, pos.getY() + 1.2, pos.getZ() + 0.9);
 		return level.getEntities((Entity) null, box, entity -> !entity.getUUID().equals(passengerUuid)).isEmpty();
-	}
-
-	public boolean isPathOccupied(RoutePlan plan, UUID passengerUuid, UUID cartUuid) {
-		AABB box = planBox(plan, 0.5);
-		List<Entity> entities = level.getEntities((Entity) null, box, entity -> {
-			if (entity instanceof AbstractMinecart cart) {
-				return !cart.getUUID().equals(cartUuid);
-			}
-			return entity instanceof LivingEntity && !entity.getUUID().equals(passengerUuid);
-		});
-		return !entities.isEmpty();
-	}
-
-	public boolean isPathBlockedAhead(RoutePlan plan, double cartCoordinate, double lookahead,
-			UUID cartUuid, UUID passengerUuid) {
-		int sign = plan.departureSign();
-		double target = cartCoordinate + sign * lookahead;
-		AABB box = planBox(plan, 0.5, cartCoordinate, target);
-		return !level.getEntities((Entity) null, box, entity -> {
-			if (entity.getUUID().equals(passengerUuid)) {
-				return false;
-			}
-			if (entity instanceof AbstractMinecart cart) {
-				return !cart.getUUID().equals(cartUuid);
-			}
-			return entity instanceof LivingEntity;
-		}).isEmpty();
-	}
-
-	private AABB planBox(RoutePlan plan, double margin) {
-		int from = plan.axis() == RailAxis.X ? plan.fromDock().x() : plan.fromDock().z();
-		int to = plan.axis() == RailAxis.X ? plan.toDock().x() : plan.toDock().z();
-		return planBox(plan, margin, from, to);
-	}
-
-	private AABB planBox(RoutePlan plan, double margin, double a, double b) {
-		double min = Math.min(a, b) + 0.5;
-		double max = Math.max(a, b) + 0.5;
-		int y = plan.fromDock().y();
-		if (plan.axis() == RailAxis.X) {
-			double z = plan.fromDock().z() + 0.5;
-			return new AABB(min - margin, y - 0.5, z - margin, max + margin, y + 1.5, z + margin);
-		}
-		double x = plan.fromDock().x() + 0.5;
-		return new AABB(x - margin, y - 0.5, min - margin, x + margin, y + 1.5, max + margin);
-	}
-
-	/** Returns null when the whole route is ready, otherwise the first blocking failure. */
-	public Failure validateRoute(RoutePlan plan) {
-		int from = plan.axis() == RailAxis.X ? plan.fromDock().x() : plan.fromDock().z();
-		int to = plan.axis() == RailAxis.X ? plan.toDock().x() : plan.toDock().z();
-		int sign = Integer.compare(to, from);
-		if (sign == 0) {
-			return Failure.at(FailureCode.NO_PATH, plan.fromDock());
-		}
-		int y = plan.fromDock().y();
-		for (int coord = from; ; coord += sign) {
-			BlockLocation location = plan.axis() == RailAxis.X
-					? new BlockLocation(coord, y, plan.fromDock().z())
-					: new BlockLocation(plan.fromDock().x(), y, coord);
-			BlockPos pos = pos(location);
-			if (!level.isLoaded(pos) || !level.isPositionEntityTicking(pos)) {
-				return Failure.at(FailureCode.WORLD_NOT_LOADED, location);
-			}
-			RailProbe probe = probe(location);
-			if (probe instanceof RailProbe.Unloaded) {
-				return Failure.at(FailureCode.WORLD_NOT_LOADED, location);
-			}
-			if (!(probe instanceof RailProbe.Rail rail)) {
-				return Failure.at(FailureCode.SCAN_INCOMPLETE, location);
-			}
-			RailInfo info = rail.info();
-			if (!info.straight() || info.slope() || info.axis() != plan.axis()
-					|| info.kind() == RailKind.DETECTOR || info.kind() == RailKind.ACTIVATOR) {
-				return Failure.at(FailureCode.UNSUPPORTED_GEOMETRY, location);
-			}
-			if (coord == to) {
-				break;
-			}
-		}
-		return null;
 	}
 
 	public static AABB allEntities() {

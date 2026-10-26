@@ -10,18 +10,13 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class TripTest {
-	private static final RoutePlan PLAN = new RoutePlan(
+	private record TestPlan(StationId from, StationId to, String componentKey) implements TripPlan {
+	}
+
+	private static final TripPlan PLAN = new TestPlan(
 			new StationId("alpha"),
 			new StationId("beta"),
-			"minecraft:overworld",
-			RailAxis.X,
-			new BlockLocation(0, 64, 0),
-			new BlockLocation(4, 64, 0),
-			new BlockLocation(4, 65, 0),
-			90.0f,
-			1,
-			4.0,
-			"minecraft:overworld|X|0,64,0|4,64,0"
+			"minecraft:overworld|test"
 	);
 
 	@Test
