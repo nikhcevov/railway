@@ -15,10 +15,10 @@ import java.util.Objects;
  * Both sides finding a dock is ambiguous; no side finding one is rejected.
  *
  * <p>Pillar validation checks that the sign is mounted on a solid pillar
- * column, that the sign and button heights are independently within
- * {@code dockY + 1 .. dockY + 3}, that a destination unit has exactly one stone
- * button attached to the same column, and that the pillar is 1-3 blocks from a
- * dock that lies on the sign's normal axis.
+ * column, that the sign and button heights are independently the first through third
+ * block above the rail support (block Y {@code dockY .. dockY + 2}), that a destination
+ * unit has exactly one stone button attached to the same column, and that the pillar is
+ * 1-3 blocks from a dock that lies on the sign's normal axis.
  *
  * <p>Station exits, station identity, and persistence are deliberately out of
  * scope. Error results are typed for the caller to map to user messages.
@@ -31,6 +31,7 @@ public final class PillarGeometry {
 	public static final int MAX_PILLAR_DISTANCE = 3;
 	/** A destination unit only has to sit within this horizontal distance of the station dock. */
 	public static final int MAX_DESTINATION_DISTANCE = 4;
+	/** Height 1 is the rail block level, 3 is two blocks above it. */
 	public static final int MIN_UNIT_HEIGHT = 1;
 	public static final int MAX_UNIT_HEIGHT = 3;
 
@@ -204,7 +205,7 @@ public final class PillarGeometry {
 	}
 
 	private static boolean withinUnitHeight(int blockY, int dockY) {
-		int height = blockY - dockY;
+		int height = blockY - dockY + 1;
 		return height >= MIN_UNIT_HEIGHT && height <= MAX_UNIT_HEIGHT;
 	}
 

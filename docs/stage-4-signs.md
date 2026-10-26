@@ -43,8 +43,10 @@ One destination unit is one solid pillar with exactly one wall sign and one ston
 - Part of the same solid pillar: the sign's support and the button's support must be in
   the same `(x,z)` column.
 - Pillar horizontal distance from the target rail: 1-3 blocks.
-- Sign and button heights: independently `dockY + 1` through `dockY + 3`. They do not
-  have to be at the same height.
+- Sign and button heights: independently the first through third block above the
+  rail support, i.e. block Y `dockY` through `dockY + 2` (the first block above the
+  ground carrying the rail through the third). They do not have to be at the same
+  height. A button and sign at the rail block level are valid.
 - One sign and one stone button per pillar. Multiple destinations use multiple pillars.
 - The sign's horizontal normal axis must be perpendicular to the target track. Railway
   scans **both** the front and back normal directions in a one-block-wide prism, 1-5
@@ -158,7 +160,7 @@ the second sign at Mine.
 ## Boarding
 
 For sign-created stations, boarding checks use horizontal distance <= 4 and vertical
-difference <= 3. This is required so a button at `dockY + 3` is reachable. Keep the
+difference <= 3. This is required so the highest allowed button level is reachable. Keep the
 returned exit within the same boarding envelope.
 
 ## Acceptance tests
@@ -166,7 +168,7 @@ returned exit within the same boarding envelope.
 Unit tests:
 
 - both normal directions find exactly one dock; both-hit and no-hit rejected;
-- pillar 1-3 and sign/button heights 1-3;
+- pillar 1-3 and sign/button heights 1-3 above the rail support;
 - straight horizontal rail only; curve/slope/crossing rejected;
 - name normalize/uniqueness and hidden deterministic ID;
 - provisional station lifecycle and pruning;

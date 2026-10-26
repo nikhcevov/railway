@@ -6,7 +6,7 @@ public enum PillarError {
 	SIGN_SUPPORT_NOT_SOLID,
 	/** The sign is not attached to the stated support along its normal axis. */
 	SIGN_NOT_ATTACHED,
-	/** The sign is outside {@code dockY + 1 .. dockY + 3}. */
+	/** The sign is outside the first through third block above the rail support. */
 	SIGN_HEIGHT_OUT_OF_RANGE,
 	/** The destination unit has no button. */
 	MISSING_BUTTON,
@@ -16,7 +16,7 @@ public enum PillarError {
 	BUTTON_NOT_ON_PILLAR,
 	/** The pillar block behind the button is not solid. */
 	BUTTON_SUPPORT_NOT_SOLID,
-	/** The button is outside {@code dockY + 1 .. dockY + 3}. */
+	/** The button is outside the first through third block above the rail support. */
 	BUTTON_HEIGHT_OUT_OF_RANGE,
 	/** The dock is not on the sign's normal axis. */
 	DOCK_NOT_ALIGNED,

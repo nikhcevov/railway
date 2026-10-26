@@ -61,8 +61,8 @@ public final class SignGameTests implements CustomTestMethodInvoker {
 	@GameTest(maxTicks = 200)
 	public void homeSignAnchorsHomeAndCreatesProvisionalMine(GameTestHelper helper) {
 		Fixture fixture = buildFixture(helper);
-		BlockLocation sign = placeWallSign(helper, HOME_X, 3, Z_SIGN, Direction.NORTH);
-		BlockLocation button = placeWallButton(helper, HOME_X, 4, Z_SIGN, Direction.NORTH);
+		BlockLocation sign = placeWallSign(helper, HOME_X, 2, Z_SIGN, Direction.NORTH);
+		BlockLocation button = placeWallButton(helper, HOME_X, 1, Z_SIGN, Direction.NORTH);
 		check(helper, fixture.level().getBlockState(RailWorld.pos(button)).is(Blocks.STONE_BUTTON),
 				"home button was not placed: " + fixture.level().getBlockState(RailWorld.pos(button)));
 		clearRegistration(fixture, sign, button);
@@ -108,7 +108,7 @@ public final class SignGameTests implements CustomTestMethodInvoker {
 	public void mineSignAnchorsProvisionalAndBothRoutesStart(GameTestHelper helper) {
 		Fixture fixture = buildFixture(helper);
 		BlockLocation homeSign = placeWallSign(helper, HOME_X, 3, Z_SIGN, Direction.NORTH);
-		BlockLocation homeButton = placeWallButton(helper, HOME_X, 4, Z_SIGN, Direction.NORTH);
+		BlockLocation homeButton = placeWallButton(helper, HOME_X, 2, Z_SIGN, Direction.NORTH);
 		clearRegistration(fixture, homeSign, homeButton);
 		saveSign(fixture, homeSign, fixture.player(), fixture.homeName(), fixture.mineName());
 
@@ -120,7 +120,7 @@ public final class SignGameTests implements CustomTestMethodInvoker {
 
 		ServerPlayer mineBuilder = opPlayer(helper, fixture, fixture.mineExit());
 		BlockLocation mineSign = placeWallSign(helper, MINE_X, 3, Z_SIGN, Direction.NORTH);
-		BlockLocation mineButton = placeWallButton(helper, MINE_X, 4, Z_SIGN, Direction.NORTH);
+		BlockLocation mineButton = placeWallButton(helper, MINE_X, 2, Z_SIGN, Direction.NORTH);
 		clearRegistration(fixture, mineSign, mineButton);
 		saveSign(fixture, mineSign, mineBuilder, fixture.mineName(), fixture.homeName());
 
@@ -166,8 +166,8 @@ public final class SignGameTests implements CustomTestMethodInvoker {
 	@GameTest(maxTicks = 200)
 	public void highSignAndButtonAreAccepted(GameTestHelper helper) {
 		Fixture fixture = buildFixture(helper);
-		BlockLocation sign = placeWallSign(helper, HOME_X, DOCK_Y + 3, Z_SIGN, Direction.NORTH);
-		BlockLocation button = placeWallButton(helper, HOME_X, DOCK_Y + 3, Z_EXIT, Direction.SOUTH);
+		BlockLocation sign = placeWallSign(helper, HOME_X, DOCK_Y + 2, Z_SIGN, Direction.NORTH);
+		BlockLocation button = placeWallButton(helper, HOME_X, DOCK_Y + 2, Z_EXIT, Direction.SOUTH);
 		clearRegistration(fixture, sign, button);
 
 		saveSign(fixture, sign, fixture.player(), fixture.homeName(), fixture.mineName());
@@ -212,7 +212,7 @@ public final class SignGameTests implements CustomTestMethodInvoker {
 	public void destinationUnitForAnchoredStationIsAccepted(GameTestHelper helper) {
 		Fixture fixture = buildFixture(helper);
 		BlockLocation homeSign = placeWallSign(helper, HOME_X, 3, Z_SIGN, Direction.NORTH);
-		clearRegistration(fixture, homeSign, absolute(helper, HOME_X, 4, Z_SIGN));
+		clearRegistration(fixture, homeSign, absolute(helper, HOME_X, 2, Z_SIGN));
 		saveSign(fixture, homeSign, fixture.player(), fixture.homeName(), "");
 
 		Station home = station(helper, fixture, fixture.homeName());
@@ -257,7 +257,7 @@ public final class SignGameTests implements CustomTestMethodInvoker {
 	public void breakingAnchorSignDisablesStationAndKeepsStationData(GameTestHelper helper) {
 		Fixture fixture = buildFixture(helper);
 		BlockLocation sign = placeWallSign(helper, HOME_X, 3, Z_SIGN, Direction.NORTH);
-		BlockLocation button = placeWallButton(helper, HOME_X, 4, Z_SIGN, Direction.NORTH);
+		BlockLocation button = placeWallButton(helper, HOME_X, 2, Z_SIGN, Direction.NORTH);
 		clearRegistration(fixture, sign, button);
 		saveSign(fixture, sign, fixture.player(), fixture.homeName(), fixture.mineName());
 
@@ -283,7 +283,7 @@ public final class SignGameTests implements CustomTestMethodInvoker {
 	public void breakingButtonKeepsAnchorMarkerAndDropsBinding(GameTestHelper helper) {
 		Fixture fixture = buildFixture(helper);
 		BlockLocation sign = placeWallSign(helper, HOME_X, 3, Z_SIGN, Direction.NORTH);
-		BlockLocation button = placeWallButton(helper, HOME_X, 4, Z_SIGN, Direction.NORTH);
+		BlockLocation button = placeWallButton(helper, HOME_X, 2, Z_SIGN, Direction.NORTH);
 		clearRegistration(fixture, sign, button);
 		saveSign(fixture, sign, fixture.player(), fixture.homeName(), fixture.mineName());
 
@@ -305,7 +305,7 @@ public final class SignGameTests implements CustomTestMethodInvoker {
 	public void nonBuilderEditIsReverted(GameTestHelper helper) {
 		Fixture fixture = buildFixture(helper);
 		BlockLocation sign = placeWallSign(helper, HOME_X, 3, Z_SIGN, Direction.NORTH);
-		BlockLocation button = placeWallButton(helper, HOME_X, 4, Z_SIGN, Direction.NORTH);
+		BlockLocation button = placeWallButton(helper, HOME_X, 2, Z_SIGN, Direction.NORTH);
 		clearRegistration(fixture, sign, button);
 		saveSign(fixture, sign, fixture.player(), fixture.homeName(), fixture.mineName());
 
@@ -334,7 +334,7 @@ public final class SignGameTests implements CustomTestMethodInvoker {
 	public void editFromTheUnregisteredSideIsReverted(GameTestHelper helper) {
 		Fixture fixture = buildFixture(helper);
 		BlockLocation sign = placeWallSign(helper, HOME_X, 3, Z_SIGN, Direction.NORTH);
-		BlockLocation button = placeWallButton(helper, HOME_X, 4, Z_SIGN, Direction.NORTH);
+		BlockLocation button = placeWallButton(helper, HOME_X, 2, Z_SIGN, Direction.NORTH);
 		clearRegistration(fixture, sign, button);
 		saveSign(fixture, sign, fixture.player(), fixture.homeName(), fixture.mineName());
 
@@ -356,7 +356,7 @@ public final class SignGameTests implements CustomTestMethodInvoker {
 	public void ordinaryWallSignIsIgnored(GameTestHelper helper) {
 		Fixture fixture = buildFixture(helper);
 		BlockLocation sign = placeWallSign(helper, HOME_X, 3, Z_SIGN, Direction.NORTH);
-		BlockLocation button = absolute(helper, HOME_X, 4, Z_SIGN);
+		BlockLocation button = absolute(helper, HOME_X, 1, Z_SIGN);
 		clearRegistration(fixture, sign, button);
 
 		saveSignLines(fixture, sign, fixture.player(), true,
@@ -390,14 +390,14 @@ public final class SignGameTests implements CustomTestMethodInvoker {
 		Fixture fixture = buildFixture(helper);
 
 		BlockLocation homeSign = placeWallSign(helper, HOME_X, 3, Z_SIGN, Direction.NORTH);
-		clearRegistration(fixture, homeSign, absolute(helper, HOME_X, 4, Z_SIGN));
+		clearRegistration(fixture, homeSign, absolute(helper, HOME_X, 2, Z_SIGN));
 		saveSign(fixture, homeSign, fixture.player(), fixture.homeName(), "");
 		Station home = station(helper, fixture, fixture.homeName());
 		finishScan(fixture, helper, home);
 
 		ServerPlayer mineBuilder = opPlayer(helper, fixture, fixture.mineExit());
 		BlockLocation mineSign = placeWallSign(helper, MINE_X, 3, Z_SIGN, Direction.NORTH);
-		clearRegistration(fixture, mineSign, absolute(helper, MINE_X, 4, Z_SIGN));
+		clearRegistration(fixture, mineSign, absolute(helper, MINE_X, 2, Z_SIGN));
 		saveSign(fixture, mineSign, mineBuilder, fixture.mineName(), "");
 		Station mine = station(helper, fixture, fixture.mineName());
 		finishScan(fixture, helper, mine);

@@ -25,7 +25,14 @@ class PillarValidationTest {
 
 	@Test
 	void acceptsIndependentSignAndButtonHeights() {
-		PillarValidation.Valid valid = valid(unit(1, 67, 65));
+		PillarValidation.Valid valid = valid(unit(1, 65, 66));
+
+		assertEquals(1, valid.pillarDistance());
+	}
+
+	@Test
+	void acceptsButtonOnTheFirstLevelAndSignOnTheSecond() {
+		PillarValidation.Valid valid = valid(unit(1, 65, 64));
 
 		assertEquals(1, valid.pillarDistance());
 	}
@@ -45,15 +52,15 @@ class PillarValidationTest {
 	}
 
 	@Test
-	void rejectsSignAtDockHeightAndAboveTheUnitRange() {
-		assertEquals(PillarError.SIGN_HEIGHT_OUT_OF_RANGE, invalid(unit(1, 64, 66)));
-		assertEquals(PillarError.SIGN_HEIGHT_OUT_OF_RANGE, invalid(unit(1, 68, 66)));
+	void rejectsSignBelowTheFirstLevelAndAboveTheUnitRange() {
+		assertEquals(PillarError.SIGN_HEIGHT_OUT_OF_RANGE, invalid(unit(1, 63, 66)));
+		assertEquals(PillarError.SIGN_HEIGHT_OUT_OF_RANGE, invalid(unit(1, 67, 66)));
 	}
 
 	@Test
-	void rejectsButtonAtDockHeightAndAboveTheUnitRange() {
-		assertEquals(PillarError.BUTTON_HEIGHT_OUT_OF_RANGE, invalid(unit(1, 66, 64)));
-		assertEquals(PillarError.BUTTON_HEIGHT_OUT_OF_RANGE, invalid(unit(1, 66, 68)));
+	void rejectsButtonBelowTheFirstLevelAndAboveTheUnitRange() {
+		assertEquals(PillarError.BUTTON_HEIGHT_OUT_OF_RANGE, invalid(unit(1, 66, 63)));
+		assertEquals(PillarError.BUTTON_HEIGHT_OUT_OF_RANGE, invalid(unit(1, 66, 67)));
 	}
 
 	@Test
@@ -166,9 +173,9 @@ class PillarValidationTest {
 
 	@Test
 	void anchorValidationStillChecksSignGeometry() {
-		BlockLocation support = new BlockLocation(1, 64, 0);
+		BlockLocation support = new BlockLocation(1, 63, 0);
 		put(support, solid());
-		PillarUnit anchor = new PillarUnit(new BlockLocation(2, 64, 0), support, HorizontalAxis.X);
+		PillarUnit anchor = new PillarUnit(new BlockLocation(2, 63, 0), support, HorizontalAxis.X);
 
 		PillarValidation.Invalid invalid = assertInstanceOf(
 				PillarValidation.Invalid.class, PillarGeometry.validateAnchor(anchor, DOCK, view));

@@ -42,7 +42,7 @@ public final class PlayerActions {
 	/**
 	 * Boarding envelope for sign-created stations: horizontal 4 blocks and vertical 3
 	 * blocks from the dock. It deliberately keeps the full vertical tolerance so a
-	 * button at {@code dockY + 3} is reachable.
+	 * a button at the highest allowed level is reachable.
 	 */
 	public static boolean withinSignRadius(ServerPlayer player, BlockLocation dock) {
 		double dx = player.getX() - (dock.x() + 0.5);

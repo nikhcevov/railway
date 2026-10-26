@@ -632,8 +632,8 @@ public final class SignRegistrationService {
 			int dockY,
 			int signY
 	) {
-		int minY = Math.min(dockY + PillarGeometry.MIN_UNIT_HEIGHT, signY - SUPPORT_SCAN_DEPTH);
-		int maxY = Math.max(dockY + PillarGeometry.MAX_UNIT_HEIGHT, signY + SUPPORT_SCAN_DEPTH);
+		int minY = Math.min(dockY + PillarGeometry.MIN_UNIT_HEIGHT - 1, signY - SUPPORT_SCAN_DEPTH);
+		int maxY = Math.max(dockY + PillarGeometry.MAX_UNIT_HEIGHT - 1, signY + SUPPORT_SCAN_DEPTH);
 		List<BlockLocation> found = new ArrayList<>();
 		for (int y = minY; y <= maxY; y++) {
 			for (Direction direction : HORIZONTAL) {
