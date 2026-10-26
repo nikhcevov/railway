@@ -2,10 +2,17 @@ package dev.nikhcevov.railway.gametest;
 
 import dev.nikhcevov.railway.dispatch.ChunkWindow;
 import dev.nikhcevov.railway.domain.BlockLocation;
+import dev.nikhcevov.railway.domain.Failure;
+import dev.nikhcevov.railway.domain.FailureCode;
+import dev.nikhcevov.railway.domain.StationId;
 import dev.nikhcevov.railway.domain.TripId;
 import dev.nikhcevov.railway.minecraft.ChunkTicketManager;
 import dev.nikhcevov.railway.minecraft.RailWorld;
 import dev.nikhcevov.railway.minecraft.Railway;
+import dev.nikhcevov.railway.network.GraphRoutePlan;
+import dev.nikhcevov.railway.network.RailPort;
+import dev.nikhcevov.railway.network.RailShapeType;
+import dev.nikhcevov.railway.network.RouteStep;
 
 import net.fabricmc.fabric.api.gametest.v1.CustomTestMethodInvoker;
 import net.fabricmc.fabric.api.gametest.v1.GameTest;
@@ -13,6 +20,9 @@ import net.fabricmc.fabric.api.gametest.v1.GameTest;
 import net.minecraft.core.BlockPos;
 import net.minecraft.gametest.framework.GameTestHelper;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.RailBlock;
+import net.minecraft.world.level.block.state.properties.RailShape;
 
 import java.lang.reflect.Method;
 import java.util.List;
@@ -122,6 +132,47 @@ public final class ChunkTicketGameTests implements CustomTestMethodInvoker {
 				helper.succeed();
 			}
 		});
+	}
+
+	@GameTest(maxTicks = 40)
+	public void launchValidationDefersUnloadedRouteTail(GameTestHelper helper) {
+		ServerLevel level = helper.getLevel();
+		helper.setBlock(new BlockPos(0, 0, 0), Blocks.STONE);
+		BlockPos railPos = helper.absolutePos(new BlockPos(0, 1, 0));
+		level.setBlock(railPos, Blocks.RAIL.defaultBlockState()
+				.setValue(RailBlock.SHAPE, RailShape.EAST_WEST), 2);
+		BlockLocation loaded = RailWorld.loc(railPos);
+		ChunkWindow.Key origin = ChunkWindow.Key.of(loaded);
+		BlockLocation far = new BlockLocation((origin.x() + 256) * 16 + 8, 64,
+				(origin.z() + 256) * 16 + 8);
+		if (new RailWorld(level).isLoaded(far)) {
+			throw helper.assertionException("test tail chunk unexpectedly loaded");
+		}
+
+		GraphRoutePlan plan = new GraphRoutePlan(
+				new StationId("gtlauncha"), new StationId("gtlaunchb"),
+				loaded, far, RailWorld.dimension(level),
+				List.of(
+						new RouteStep(loaded, RailShapeType.EAST_WEST, RailPort.WEST, RailPort.EAST),
+						new RouteStep(far, RailShapeType.NORTH_SOUTH, RailPort.NORTH, RailPort.SOUTH)),
+				List.of(), 2, "launch-test");
+		Failure deferred = new RailWorld(level).validateGraphRoute(plan);
+		if (deferred != null) {
+			throw helper.assertionException("unloaded tail rejected launch: " + deferred.code());
+		}
+
+		GraphRoutePlan wrongShape = new GraphRoutePlan(
+				new StationId("gtlauncha"), new StationId("gtlaunchb"),
+				loaded, far, RailWorld.dimension(level),
+				List.of(
+						new RouteStep(loaded, RailShapeType.NORTH_SOUTH, RailPort.NORTH, RailPort.SOUTH),
+						new RouteStep(far, RailShapeType.NORTH_SOUTH, RailPort.NORTH, RailPort.SOUTH)),
+				List.of(), 2, "launch-test-bad");
+		Failure loadedFailure = new RailWorld(level).validateGraphRoute(wrongShape);
+		if (loadedFailure == null || loadedFailure.code() != FailureCode.SCAN_INCOMPLETE) {
+			throw helper.assertionException("loaded rail shape was not validated");
+		}
+		helper.succeed();
 	}
 
 	@Override

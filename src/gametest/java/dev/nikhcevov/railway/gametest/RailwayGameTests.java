@@ -307,6 +307,31 @@ public final class RailwayGameTests implements CustomTestMethodInvoker {
 		});
 	}
 
+	@GameTest(maxTicks = 600)
+	public void unloadedDestinationExitIsDeferredUntilArrival(GameTestHelper helper) {
+		Fixture fixture = buildFixture(helper, "x");
+		BlockLocation farExit = new BlockLocation(fixture.mineExit().x() + 256 * 16,
+				fixture.mineExit().y(), fixture.mineExit().z());
+		Station mine = fixture.mine();
+		fixture.railway().state().updateStation(
+				mine.withExit(farExit, 0.0F, fixture.railway().state().nextRevision()));
+		if (new RailWorld(fixture.level()).isLoaded(farExit)) {
+			throw helper.assertionException("far exit chunk unexpectedly loaded");
+		}
+
+		ServerPlayer player = fixture.newPlayer(helper, fixture.homeExit);
+		TripId[] trip = {null};
+		startWhenFree(helper, fixture, player, fixture.homeToMine, trip);
+		helper.succeedWhen(() -> {
+			requireStarted(helper, trip);
+			requireTripFinished(helper, fixture.railway(), trip[0]);
+			if (fixture.railway().tickets().tripTicketCount(trip[0]) != 0) {
+				throw helper.assertionException("deferred arrival leaked chunk tickets");
+			}
+			requireNoManagedCart(helper, fixture.level());
+		});
+	}
+
 	// ----------------------------------------------------------------- fixture
 
 	private record Fixture(Railway railway, ServerLevel level, Station home, Station mine,

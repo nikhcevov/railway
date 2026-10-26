@@ -614,7 +614,7 @@ public final class RailCommand {
 		if (worldFailure != null) {
 			return fail(source, worldFailure);
 		}
-		if (!world.isSafeStand(to.exit())) {
+		if (world.isLoaded(to.exit()) && !world.isSafeStand(to.exit())) {
 			return fail(source, Failure.at(FailureCode.EXIT_UNSAFE, to.exit()));
 		}
 		return ok(source, "route.ok", from.id().value(), to.id().value(), Integer.toString(plan.length()),

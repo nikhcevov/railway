@@ -15,10 +15,12 @@ import dev.nikhcevov.railway.domain.TripId;
 import dev.nikhcevov.railway.domain.TripPhase;
 import dev.nikhcevov.railway.motion.MotionProfile;
 import dev.nikhcevov.railway.network.GraphRoutePlan;
+import dev.nikhcevov.railway.network.LaunchCheck;
 import dev.nikhcevov.railway.network.RailGraph;
 import dev.nikhcevov.railway.network.RailGraphPlanner;
 import dev.nikhcevov.railway.network.RailShapeType;
 import dev.nikhcevov.railway.network.RouteStep;
+import dev.nikhcevov.railway.network.SwitchRequirement;
 import dev.nikhcevov.railway.persistence.Config;
 import dev.nikhcevov.railway.persistence.TripRecord;
 
@@ -72,6 +74,7 @@ public final class TripService {
 		final GraphRoutePlan plan;
 		final MotionProfile profile;
 		final Map<BlockLocation, RailShapeType> requiredSwitches;
+		final Set<BlockLocation> preparedSwitches = new LinkedHashSet<>();
 		final List<BlockLocation> route;
 		final Set<ChunkWindow.Key> routeChunks;
 		final double safetyMargin;
@@ -85,6 +88,7 @@ public final class TripService {
 		long lastSafeRetryTick;
 		long lastProgressTick;
 		long chunkWaitSinceTick = -1;
+		long arrivalWaitSinceTick = -1;
 		List<ChunkWindow.Key> ticketWindow = List.of();
 		int ticketWindowStep = -1;
 		double lastX;
@@ -259,7 +263,9 @@ public final class TripService {
 		if (!world.isDockFree(plan.fromDock(), player.getUUID())) {
 			return reject(FailureCode.DOCK_OCCUPIED, from.id().value());
 		}
-		if (!world.isSafeStand(to.exit())) {
+		// If the destination is already loaded, keep failing early on an unsafe
+		// exit. Otherwise the exit is checked once the cart reaches its chunk.
+		if (world.isLoaded(to.exit()) && !world.isSafeStand(to.exit())) {
 			return reject(Failure.at(FailureCode.EXIT_UNSAFE, to.exit()));
 		}
 		if (world.isPathOccupied(plan, player.getUUID(), new UUID(0L, 0L))) {
@@ -290,11 +296,6 @@ public final class TripService {
 			return reject(Failure.detail(FailureCode.RESERVATION_CONFLICT,
 					blocked == null ? "resource conflict" : blocked));
 		}
-		Failure switchFailure = world.prepareSwitches(plan);
-		if (switchFailure != null) {
-			reservations.releaseAll(tripId.value());
-			return reject(switchFailure);
-		}
 
 		Minecart cart = null;
 		try {
@@ -320,6 +321,12 @@ public final class TripService {
 			ActiveTrip activeTrip = new ActiveTrip(trip, cart, world, plan, profile,
 					config.safetyMargin(), fromGraph.revision(), config.maxTripTicks(),
 					tick + config.boardingDelayTicks(), config.maxManagedChunkTickets());
+			Failure switchFailure = prepareLoadedSwitches(activeTrip);
+			if (switchFailure != null) {
+				PlayerActions.discardCart(cart);
+				reservations.releaseAll(tripId.value());
+				return reject(switchFailure);
+			}
 			Failure ticketFailure = updateChunkTickets(activeTrip);
 			if (ticketFailure != null) {
 				PlayerActions.discardCart(cart);
@@ -450,7 +457,7 @@ public final class TripService {
 				if (tick >= at.departureTick) {
 					Failure ready = at.world.validateGraphRoute(at.plan);
 					if (ready == null) {
-						ready = at.world.prepareSwitches(at.plan);
+						ready = prepareLoadedSwitches(at);
 					}
 					if (ready != null) {
 						abort(at, tick, ready);
@@ -610,8 +617,42 @@ public final class TripService {
 		for (int i = at.stepIndex; i <= last; i++) {
 			RouteStep step = at.plan.steps().get(i);
 			RailShapeType required = at.requiredSwitches.get(step.pos());
-			if (required != null && at.world.isLoaded(step.pos()) && at.world.shapeAt(step.pos()) != required) {
-				return Failure.at(FailureCode.UNSUPPORTED_GEOMETRY, step.pos(), "turnout changed ahead");
+			if (required == null || !at.world.isLoaded(step.pos())) {
+				continue;
+			}
+			Failure failure = ensureSwitch(at, step.pos(), required);
+			if (failure != null) {
+				return failure;
+			}
+		}
+		return null;
+	}
+
+	/**
+	 * Prepares a turnout the first time its chunk is loaded, then keeps checking
+	 * it so an external shape change still aborts the trip.
+	 */
+	private Failure ensureSwitch(ActiveTrip at, BlockLocation pos, RailShapeType required) {
+		if (!at.preparedSwitches.contains(pos)) {
+			Failure failure = at.world.prepareSwitch(pos, required);
+			if (failure != null) {
+				return failure;
+			}
+			at.preparedSwitches.add(pos);
+			return null;
+		}
+		if (at.world.shapeAt(pos) != required) {
+			return Failure.at(FailureCode.UNSUPPORTED_GEOMETRY, pos, "turnout changed ahead");
+		}
+		return null;
+	}
+
+	/** Applies every switch whose chunk is loaded now; the rest wait for their chunk. */
+	private Failure prepareLoadedSwitches(ActiveTrip at) {
+		for (SwitchRequirement requirement : LaunchCheck.loadedSwitches(at.plan, at.world::isLoaded)) {
+			Failure failure = ensureSwitch(at, requirement.pos(), requirement.requiredShape());
+			if (failure != null) {
+				return failure;
 			}
 		}
 		return null;
@@ -692,13 +733,17 @@ public final class TripService {
 		if (station != null && station.hasExit()) {
 			exit = station.exit();
 		}
+		if (!at.world.isPositionReady(exit)) {
+			waitForArrival(at, player, tick, exit, FailureCode.CHUNKS_NOT_READY);
+			return;
+		}
 		BlockLocation target;
 		if (at.world.isSafeStand(exit)) {
 			target = exit;
 		} else {
 			Optional<BlockLocation> safe = at.world.findSafeSpot(exit, 3);
 			if (safe.isEmpty()) {
-				warnPeriodically(at, player, tick, "error.exit_unsafe");
+				waitForArrival(at, player, tick, exit, FailureCode.EXIT_UNSAFE);
 				return;
 			}
 			target = safe.get();
@@ -717,6 +762,21 @@ public final class TripService {
 			quarantineAndRemove(at, "cart removal unverified after arrival");
 		}
 		Messages.actionBar(player, "actionbar.arrived", station == null ? plan.to().value() : station.displayName());
+	}
+
+	private void waitForArrival(ActiveTrip at, ServerPlayer player, long tick, BlockLocation target,
+			FailureCode code) {
+		if (at.arrivalWaitSinceTick < 0) {
+			at.arrivalWaitSinceTick = tick;
+		}
+		if (tick - at.arrivalWaitSinceTick > CHUNK_READY_WAIT_TICKS) {
+			logger.warn("Trip {} arrival target {} unusable: {}", at.trip.id(),
+					target.shortString(), code);
+			abort(at, tick, Failure.at(code, target));
+			return;
+		}
+		warnPeriodically(at, player, tick,
+				code == FailureCode.CHUNKS_NOT_READY ? "error.chunks_not_ready" : "error.exit_unsafe");
 	}
 
 	private void retrySafeExit(ActiveTrip at, ServerPlayer player, long tick) {

@@ -5,6 +5,7 @@ import dev.nikhcevov.railway.domain.Failure;
 import dev.nikhcevov.railway.domain.FailureCode;
 import dev.nikhcevov.railway.network.GraphRailView;
 import dev.nikhcevov.railway.network.GraphRoutePlan;
+import dev.nikhcevov.railway.network.LaunchCheck;
 import dev.nikhcevov.railway.network.RailKind;
 import dev.nikhcevov.railway.network.RailShapeType;
 import dev.nikhcevov.railway.network.RouteStep;
@@ -170,11 +171,10 @@ public final class RailWorld implements GraphRailView {
 		for (SwitchRequirement requirement : plan.switches()) {
 			switches.add(requirement.pos());
 		}
-		for (RouteStep step : plan.steps()) {
+		// Unloaded steps are deferred until the ticket window and the cart reach
+		// them; the scan already proved their rails existed.
+		for (RouteStep step : LaunchCheck.loadedSteps(plan, this::isLoaded)) {
 			BlockLocation location = step.pos();
-			if (!isPositionReady(location)) {
-				return Failure.at(FailureCode.WORLD_NOT_LOADED, location);
-			}
 			if (!(graphProbe(location) instanceof Probe.Rail rail)) {
 				return Failure.at(FailureCode.SCAN_INCOMPLETE, location);
 			}
@@ -188,13 +188,10 @@ public final class RailWorld implements GraphRailView {
 		return null;
 	}
 
-	/** Sets and re-reads every turnout shape required by the plan. */
-	public Failure prepareSwitches(GraphRoutePlan plan) {
-		for (SwitchRequirement requirement : plan.switches()) {
-			if (!setRailShape(requirement.pos(), requirement.requiredShape())
-					|| shapeAt(requirement.pos()) != requirement.requiredShape()) {
-				return Failure.at(FailureCode.UNSUPPORTED_GEOMETRY, requirement.pos(), "turnout write failed");
-			}
+	/** Sets and re-reads a single turnout shape. */
+	public Failure prepareSwitch(BlockLocation location, RailShapeType shape) {
+		if (!setRailShape(location, shape) || shapeAt(location) != shape) {
+			return Failure.at(FailureCode.UNSUPPORTED_GEOMETRY, location, "turnout write failed");
 		}
 		return null;
 	}
@@ -202,6 +199,9 @@ public final class RailWorld implements GraphRailView {
 	public boolean isPathOccupied(GraphRoutePlan plan, UUID passengerUuid, UUID cartUuid) {
 		for (RouteStep step : plan.steps()) {
 			BlockPos pos = pos(step.pos());
+			if (!level.isLoaded(pos)) {
+				continue;
+			}
 			AABB box = new AABB(pos.getX() + 0.25, pos.getY() - 0.1, pos.getZ() + 0.25,
 					pos.getX() + 0.75, pos.getY() + 1.5, pos.getZ() + 0.75);
 			if (!level.getEntities((Entity) null, box, entity -> {
