@@ -1,0 +1,11 @@
+{
+	"required": true,
+	"package": "dev.nikhcevov.railway.mixin",
+	"compatibilityLevel": "JAVA_25",
+	"mixins": [
+		"AbstractMinecartSpeedMixin"
+	],
+	"injectors": {
+		"defaultRequire": 1
+	}
+}

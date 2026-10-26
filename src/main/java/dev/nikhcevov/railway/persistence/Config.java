@@ -38,8 +38,8 @@ public record Config(
 		int maxTripTicks
 ) {
 	public static final int CURRENT_VERSION = 1;
-	/** Stage 1 uses the verified vanilla cap; the 12 b/s target is stage 3 work. */
-	public static final double STAGE1_SPEED_CAP = 8.0;
+	/** Stage 3 target and the safe ceiling recognized by the managed-cart mixin. */
+	public static final double TARGET_SPEED_CAP = 12.0;
 
 	private static final Set<String> KNOWN_KEYS = Set.of(
 			"configVersion", "boardingRadius", "boardingDelayTicks", "playerCooldownTicks",
@@ -53,8 +53,8 @@ public record Config(
 				50_000, 250, 2, 10_000, 128, 36_000);
 	}
 
-	public double effectiveStage1Speed() {
-		return Math.min(maxSpeed, STAGE1_SPEED_CAP);
+	public double effectiveSpeed() {
+		return Math.min(maxSpeed, TARGET_SPEED_CAP);
 	}
 
 	public List<String> validate() {

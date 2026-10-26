@@ -241,7 +241,7 @@ public final class TripService {
 			Trip trip = new Trip(tripId, player.getUUID(), cart.getUUID(), plan, tick);
 			trip.transitionTo(TripPhase.BOARDING, tick);
 			MotionProfile profile = new MotionProfile(
-					config.effectiveStage1Speed(),
+					config.effectiveSpeed(),
 					config.acceleration(),
 					config.braking(),
 					0.1

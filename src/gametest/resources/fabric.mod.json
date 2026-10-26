@@ -7,7 +7,8 @@
 	"entrypoints": {
 		"fabric-gametest": [
 			"dev.nikhcevov.railway.gametest.RailwayGameTests",
-			"dev.nikhcevov.railway.gametest.TurnoutGameTests"
+			"dev.nikhcevov.railway.gametest.TurnoutGameTests",
+			"dev.nikhcevov.railway.gametest.SpeedGameTests"
 		]
 	},
 	"depends": {

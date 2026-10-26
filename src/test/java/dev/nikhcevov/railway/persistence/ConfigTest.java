@@ -103,9 +103,9 @@ class ConfigTest {
 	}
 
 	@Test
-	void effectiveStage1SpeedClampsToVerifiedCap() {
-		assertEquals(8.0, Config.defaults().effectiveStage1Speed(), "12 b/s target is capped in stage 1");
-		assertEquals(6.5, withMaxSpeed(6.5).effectiveStage1Speed(), "slower configs are not raised to the cap");
+	void effectiveSpeedClampsToStage3Target() {
+		assertEquals(12.0, Config.defaults().effectiveSpeed(), "target speed is 12 b/s");
+		assertEquals(6.5, withMaxSpeed(6.5).effectiveSpeed(), "slower configs are not raised to the cap");
 	}
 
 	@Test
