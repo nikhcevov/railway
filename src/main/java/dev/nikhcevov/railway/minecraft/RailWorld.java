@@ -5,9 +5,11 @@ import dev.nikhcevov.railway.domain.Failure;
 import dev.nikhcevov.railway.domain.FailureCode;
 import dev.nikhcevov.railway.domain.RailAxis;
 import dev.nikhcevov.railway.domain.RoutePlan;
+import dev.nikhcevov.railway.network.GraphRailView;
 import dev.nikhcevov.railway.network.RailInfo;
 import dev.nikhcevov.railway.network.RailKind;
 import dev.nikhcevov.railway.network.RailProbe;
+import dev.nikhcevov.railway.network.RailShapeType;
 import dev.nikhcevov.railway.network.RailView;
 
 import net.minecraft.core.BlockPos;
@@ -31,7 +33,7 @@ import java.util.Set;
 import java.util.UUID;
 
 /** Minecraft adapter for rails, exits, dock occupancy and route readiness. */
-public final class RailWorld implements RailView {
+public final class RailWorld implements RailView, GraphRailView {
 	private static final Set<Block> HAZARDS = Set.of(
 			Blocks.LAVA, Blocks.FIRE, Blocks.SOUL_FIRE, Blocks.MAGMA_BLOCK,
 			Blocks.CAMPFIRE, Blocks.SOUL_CAMPFIRE, Blocks.POWDER_SNOW,
@@ -83,17 +85,49 @@ public final class RailWorld implements RailView {
 			case NORTH_SOUTH, EAST_WEST, ASCENDING_NORTH, ASCENDING_SOUTH, ASCENDING_EAST, ASCENDING_WEST -> true;
 			default -> false;
 		};
-		RailKind kind;
-		if (state.is(Blocks.POWERED_RAIL)) {
-			kind = RailKind.POWERED;
-		} else if (state.is(Blocks.DETECTOR_RAIL)) {
-			kind = RailKind.DETECTOR;
-		} else if (state.is(Blocks.ACTIVATOR_RAIL)) {
-			kind = RailKind.ACTIVATOR;
-		} else {
-			kind = RailKind.NORMAL;
+		return RailProbe.rail(new RailInfo(axis, kindOf(state), straight, shape.isSlope()));
+	}
+
+	@Override
+	public Probe graphProbe(BlockLocation location) {
+		BlockPos pos = pos(location);
+		if (!level.isLoaded(pos)) {
+			return new Probe.Unloaded();
 		}
-		return RailProbe.rail(new RailInfo(axis, kind, straight, shape.isSlope()));
+		BlockState state = level.getBlockState(pos);
+		if (!BaseRailBlock.isRail(state)) {
+			return new Probe.Empty();
+		}
+		RailShape shape = state.getValue(((BaseRailBlock) state.getBlock()).getShapeProperty());
+		return new Probe.Rail(shapeType(shape), kindOf(state));
+	}
+
+	private static RailKind kindOf(BlockState state) {
+		if (state.is(Blocks.POWERED_RAIL)) {
+			return RailKind.POWERED;
+		}
+		if (state.is(Blocks.DETECTOR_RAIL)) {
+			return RailKind.DETECTOR;
+		}
+		if (state.is(Blocks.ACTIVATOR_RAIL)) {
+			return RailKind.ACTIVATOR;
+		}
+		return RailKind.NORMAL;
+	}
+
+	private static RailShapeType shapeType(RailShape shape) {
+		return switch (shape) {
+			case NORTH_SOUTH -> RailShapeType.NORTH_SOUTH;
+			case EAST_WEST -> RailShapeType.EAST_WEST;
+			case ASCENDING_EAST -> RailShapeType.ASCENDING_EAST;
+			case ASCENDING_WEST -> RailShapeType.ASCENDING_WEST;
+			case ASCENDING_NORTH -> RailShapeType.ASCENDING_NORTH;
+			case ASCENDING_SOUTH -> RailShapeType.ASCENDING_SOUTH;
+			case SOUTH_EAST -> RailShapeType.SOUTH_EAST;
+			case SOUTH_WEST -> RailShapeType.SOUTH_WEST;
+			case NORTH_WEST -> RailShapeType.NORTH_WEST;
+			case NORTH_EAST -> RailShapeType.NORTH_EAST;
+		};
 	}
 
 	public static BlockLocation loc(BlockPos pos) {
