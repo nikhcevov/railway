@@ -90,3 +90,10 @@ client smoothness are still unverified.
   and requires an explicit `/rail reload` or restart.
 - No chunk tickets, diagnostics command or crash recovery beyond checkpoint
   invalidation in stage 1; those remain stage 5.
+
+## Stage 2 update
+
+The graph scanner, directed Dijkstra, turnout shaping and route-following motion
+are now implemented. Server game tests cover a three-station T network for all
+six directed pairs, a curve-plus-slope trip and an external turnout change that
+must abort before the switch. A client check of those routes remains pending.
