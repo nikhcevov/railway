@@ -26,6 +26,18 @@ class MessagesTest {
 	}
 
 	@Test
+	void stationInfoReportsSignUnitsAndMainArrival() {
+		assertEquals("Sign units: 3", Messages.format(Messages.Lang.EN, "station.info.units", 3));
+		assertEquals("Единиц табличек: 3", Messages.format(Messages.Lang.RU, "station.info.units", 3));
+		assertEquals("Main arrival: 4 65 1",
+				Messages.format(Messages.Lang.EN, "station.info.main", "4 65 1"));
+		assertEquals("Main arrival: 4 65 1 (m flag)",
+				Messages.format(Messages.Lang.EN, "station.info.main_marker", "4 65 1"));
+		assertEquals("Главное прибытие: не задано",
+				Messages.format(Messages.Lang.RU, "station.info.main_missing"));
+	}
+
+	@Test
 	void failureTextContainsLocalizedBaseCoordinatesAndCode() {
 		Failure failure = Failure.at(FailureCode.NO_PATH, new BlockLocation(4, -60, 7));
 

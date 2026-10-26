@@ -2,6 +2,7 @@ package dev.nikhcevov.railway.persistence;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
+import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
@@ -12,9 +13,11 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.TreeSet;
+import java.util.UUID;
 
 /**
  * Server configuration. Units are blocks, blocks/second, blocks/second^2, ticks
@@ -35,8 +38,13 @@ public record Config(
 		int scanTimeBudgetMs,
 		int maxRouteLength,
 		int maxManagedChunkTickets,
-		int maxTripTicks
+		int maxTripTicks,
+		List<String> builders
 ) {
+	public Config {
+		builders = builders == null ? List.of() : List.copyOf(builders);
+	}
+
 	public static final int CURRENT_VERSION = 1;
 	/** Stage 3 target and the safe ceiling recognized by the managed-cart mixin. */
 	public static final double TARGET_SPEED_CAP = 12.0;
@@ -45,12 +53,12 @@ public record Config(
 			"configVersion", "boardingRadius", "boardingDelayTicks", "playerCooldownTicks",
 			"maxActiveTrips", "maxSpeed", "acceleration", "braking", "safetyMargin",
 			"maxRailsPerScan", "scanRailsPerTick", "scanTimeBudgetMs", "maxRouteLength",
-			"maxManagedChunkTickets", "maxTripTicks"
+			"maxManagedChunkTickets", "maxTripTicks", "builders"
 	);
 
 	public static Config defaults() {
 		return new Config(CURRENT_VERSION, 4, 10, 20, 8, 12.0, 4.0, 6.0, 2.0,
-				50_000, 250, 2, 10_000, 128, 36_000);
+				50_000, 250, 2, 10_000, 128, 36_000, List.of());
 	}
 
 	public double effectiveSpeed() {
@@ -76,7 +84,29 @@ public record Config(
 		check(errors, "maxRouteLength", maxRouteLength, 1, 1_000_000);
 		check(errors, "maxManagedChunkTickets", maxManagedChunkTickets, 0, 4_096);
 		check(errors, "maxTripTicks", maxTripTicks, 20, 1_000_000);
+		checkBuilders(errors, builders);
 		return errors;
+	}
+
+	private static void checkBuilders(List<String> errors, List<String> builders) {
+		Set<String> seen = new HashSet<>();
+		for (int i = 0; i < builders.size(); i++) {
+			String raw = builders.get(i);
+			if (raw == null || raw.isBlank()) {
+				errors.add("builders[" + i + "]: expected a UUID string");
+				continue;
+			}
+			UUID uuid;
+			try {
+				uuid = UUID.fromString(raw.trim());
+			} catch (IllegalArgumentException e) {
+				errors.add("builders[" + i + "]: invalid UUID \"" + raw + "\"");
+				continue;
+			}
+			if (!seen.add(uuid.toString())) {
+				errors.add("builders[" + i + "]: duplicate UUID \"" + raw + "\"");
+			}
+		}
 	}
 
 	private static void check(List<String> errors, String key, int value, int min, int max) {
@@ -148,7 +178,8 @@ public record Config(
 					intValue(object, "scanTimeBudgetMs", defaults.scanTimeBudgetMs()),
 					intValue(object, "maxRouteLength", defaults.maxRouteLength()),
 					intValue(object, "maxManagedChunkTickets", defaults.maxManagedChunkTickets()),
-					intValue(object, "maxTripTicks", defaults.maxTripTicks())
+					intValue(object, "maxTripTicks", defaults.maxTripTicks()),
+					buildersValue(object, "builders", defaults.builders())
 			);
 			List<String> errors = config.validate();
 			if (!errors.isEmpty()) {
@@ -174,6 +205,24 @@ public record Config(
 			throw new IllegalArgumentException(key + " must be an integer");
 		}
 		return value;
+	}
+
+	private static List<String> buildersValue(JsonObject object, String key, List<String> fallback) {
+		JsonElement element = object.get(key);
+		if (element == null || element.isJsonNull()) {
+			return fallback;
+		}
+		if (!element.isJsonArray()) {
+			throw new IllegalArgumentException(key + " must be an array of UUID strings");
+		}
+		List<String> values = new ArrayList<>();
+		for (JsonElement item : element.getAsJsonArray()) {
+			if (!(item instanceof JsonPrimitive primitive) || !primitive.isString()) {
+				throw new IllegalArgumentException(key + " must be an array of UUID strings");
+			}
+			values.add(primitive.getAsString().trim());
+		}
+		return values;
 	}
 
 	private static double doubleValue(JsonObject object, String key, double fallback) {
@@ -205,6 +254,11 @@ public record Config(
 		object.addProperty("maxRouteLength", config.maxRouteLength());
 		object.addProperty("maxManagedChunkTickets", config.maxManagedChunkTickets());
 		object.addProperty("maxTripTicks", config.maxTripTicks());
+		JsonArray builders = new JsonArray();
+		for (String builder : config.builders()) {
+			builders.add(builder);
+		}
+		object.add("builders", builders);
 		Gson gson = new GsonBuilder().setPrettyPrinting().disableHtmlEscaping().create();
 		Path tmp = file.resolveSibling(file.getFileName() + ".tmp");
 		Files.writeString(tmp, gson.toJson(object), StandardCharsets.UTF_8);

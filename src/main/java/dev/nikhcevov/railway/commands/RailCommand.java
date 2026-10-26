@@ -9,6 +9,7 @@ import dev.nikhcevov.railway.domain.Binding;
 import dev.nikhcevov.railway.domain.BlockLocation;
 import dev.nikhcevov.railway.domain.Failure;
 import dev.nikhcevov.railway.domain.FailureCode;
+import dev.nikhcevov.railway.domain.SignMarker;
 import dev.nikhcevov.railway.domain.Station;
 import dev.nikhcevov.railway.domain.StationId;
 import dev.nikhcevov.railway.domain.StationNames;
@@ -301,6 +302,18 @@ public final class RailCommand {
 				: Messages.text(source, "station.info.exit_missing"), false);
 		source.sendSuccess(() -> Messages.text(source, "station.info.state",
 				Messages.format(lang, station.enabled() ? "state.enabled" : "state.disabled"), station.revision()), false);
+		int signUnits = railway.state().signUnitCount(station.id());
+		source.sendSuccess(() -> Messages.text(source, "station.info.units", signUnits), false);
+		SignMarker mainMarker = railway.state().mainMarkerForStation(station.id()).orElse(null);
+		if (mainMarker != null) {
+			source.sendSuccess(() -> Messages.text(source, "station.info.main_marker",
+					mainMarker.sign().shortString()), false);
+		} else if (station.isAnchored()) {
+			source.sendSuccess(() -> Messages.text(source, "station.info.main",
+					station.dock().shortString()), false);
+		} else {
+			source.sendSuccess(() -> Messages.text(source, "station.info.main_missing"), false);
+		}
 		Collection<Binding> bindings = railway.state().bindingsFor(station.id());
 		if (bindings.isEmpty()) {
 			source.sendSuccess(() -> Messages.text(source, "station.info.no_bindings"), false);

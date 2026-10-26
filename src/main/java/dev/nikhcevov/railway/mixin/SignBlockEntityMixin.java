@@ -4,7 +4,6 @@ import dev.nikhcevov.railway.minecraft.Railway;
 
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.network.FilteredText;
-import net.minecraft.server.permissions.Permissions;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.block.entity.SignBlockEntity;
 import net.minecraft.world.level.block.entity.SignText;
@@ -56,7 +55,7 @@ public abstract class SignBlockEntityMixin {
 			return;
 		}
 		SignBlockEntity sign = (SignBlockEntity) (Object) this;
-		if (!serverPlayer.permissions().hasPermission(Permissions.COMMANDS_GAMEMASTER)) {
+		if (!railway.isBuilder(serverPlayer)) {
 			railway.signs().rejectUnauthorized(serverPlayer, sign, front, previous);
 			return;
 		}

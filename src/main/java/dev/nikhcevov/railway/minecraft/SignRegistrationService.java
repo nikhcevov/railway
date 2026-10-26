@@ -24,6 +24,7 @@ import dev.nikhcevov.railway.sign.SignFormat;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.particles.ParticleTypes;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.block.BaseRailBlock;
@@ -625,6 +626,78 @@ public final class SignRegistrationService {
 
 	// --------------------------------------------------------------- lifecycle
 
+	/**
+	 * Periodic safety net for marker blocks removed outside the player-break event,
+	 * for example by pistons or explosions. Markers in unloaded chunks are left alone;
+	 * a loaded but invalid unit is removed exactly like the corresponding block break.
+	 */
+	public void verifyMarkers(MinecraftServer server) {
+		if (railway.disabled()) {
+			return;
+		}
+		WorldState worldState = railway.state();
+		Set<String> handledSigns = new HashSet<>();
+		boolean changed = false;
+		for (SignMarker marker : List.copyOf(worldState.signMarkers())) {
+			ServerLevel level = RailWorld.level(server, marker.dimension());
+			if (level == null || !markerPositionsLoaded(level, marker)) {
+				continue;
+			}
+			if (!signStillValid(level, marker)) {
+				changed |= breakSignMarker(worldState, marker.dimension(), marker, handledSigns);
+				continue;
+			}
+			if (marker.button() != null && !buttonStillValid(level, marker)) {
+				changed |= breakButtonSide(worldState, marker.dimension(), marker.button(), marker, handledSigns);
+			}
+		}
+		if (changed) {
+			railway.saveState();
+		}
+	}
+
+	/** All recorded positions must be loaded before a marker may be invalidated. */
+	private static boolean markerPositionsLoaded(ServerLevel level, SignMarker marker) {
+		if (!level.isLoaded(RailWorld.pos(marker.sign()))
+				|| !level.isLoaded(RailWorld.pos(marker.support()))) {
+			return false;
+		}
+		if (marker.button() == null) {
+			return true;
+		}
+		return level.isLoaded(RailWorld.pos(marker.button()))
+				&& level.isLoaded(RailWorld.pos(buttonSupport(marker)));
+	}
+
+	private static boolean signStillValid(ServerLevel level, SignMarker marker) {
+		BlockPos pos = RailWorld.pos(marker.sign());
+		BlockState state = level.getBlockState(pos);
+		if (!(state.getBlock() instanceof WallSignBlock)) {
+			return false;
+		}
+		Direction back = state.getValue(WallSignBlock.FACING).getOpposite();
+		BlockLocation attached = marker.sign().offset(back.getStepX(), 0, back.getStepZ());
+		if (!attached.equals(marker.support())) {
+			return false;
+		}
+		BlockPos support = RailWorld.pos(marker.support());
+		return level.getBlockState(support).isCollisionShapeFullBlock(level, support);
+	}
+
+	private static boolean buttonStillValid(ServerLevel level, SignMarker marker) {
+		BlockPos pos = RailWorld.pos(marker.button());
+		BlockState state = level.getBlockState(pos);
+		if (!state.is(Blocks.STONE_BUTTON)) {
+			return false;
+		}
+		if (state.getValue(FaceAttachedHorizontalDirectionalBlock.FACE) != AttachFace.WALL) {
+			return false;
+		}
+		Direction back = state.getValue(HorizontalDirectionalBlock.FACING).getOpposite();
+		BlockLocation attached = marker.button().offset(back.getStepX(), 0, back.getStepZ());
+		return attached.x() == marker.support().x() && attached.z() == marker.support().z();
+	}
+
 	public void onBlockBreak(ServerLevel level, BlockPos pos, BlockState state, BlockEntity entity) {
 		if (railway.disabled()) {
 			return;
@@ -702,6 +775,9 @@ public final class SignRegistrationService {
 	) {
 		boolean changed = state.removeBinding(dimension, button).isPresent();
 		if (marker == null) {
+			if (changed) {
+				logger.info("Removed button binding at {}", button.shortString());
+			}
 			return changed;
 		}
 		if (!handledSigns.add(WorldState.signMarkerKey(marker.dimension(), marker.sign()))) {
@@ -712,6 +788,7 @@ public final class SignRegistrationService {
 		} else {
 			state.removeSignMarker(dimension, marker.sign());
 		}
+		logger.info("Removed button registration at {}", button.shortString());
 		return true;
 	}
 

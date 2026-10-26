@@ -814,6 +814,102 @@ public final class SignGameTests implements CustomTestMethodInvoker {
 		});
 	}
 
+	@GameTest(maxTicks = 200)
+	public void verifyMarkersRemovesDirectlyBrokenSign(GameTestHelper helper) {
+		Fixture fixture = buildFixture(helper);
+		BlockLocation sign = placeWallSign(helper, HOME_X, 3, Z_SIGN, Direction.NORTH);
+		BlockLocation button = placeWallButton(helper, HOME_X, 2, Z_SIGN, Direction.NORTH);
+		clearRegistration(fixture, sign, button);
+		saveSign(fixture, sign, fixture.player(), fixture.homeName(), fixture.mineName());
+		Station home = station(helper, fixture, fixture.homeName());
+		BlockLocation dock = home.dock();
+		BlockLocation exit = home.exit();
+		check(helper, state(fixture).binding(fixture.dimension(), button).isPresent(),
+				"binding missing before direct sign removal");
+
+		// Remove the block directly: the player-break event never runs.
+		fixture.level().setBlock(RailWorld.pos(sign), Blocks.AIR.defaultBlockState(), 3);
+		fixture.railway().signs().verifyMarkers(fixture.server());
+
+		check(helper, state(fixture).signMarker(fixture.dimension(), sign).isEmpty(),
+				"marker survived a directly removed sign");
+		check(helper, state(fixture).binding(fixture.dimension(), button).isEmpty(),
+				"binding survived a directly removed sign");
+		Station after = state(fixture).station(home.id()).orElse(null);
+		check(helper, after != null && after.isAnchored(), "station data was lost");
+		check(helper, dock.equals(after.dock()) && exit.equals(after.exit()), "station dock/exit changed");
+		check(helper, !after.enabled(), "station was not disabled when its last unit disappeared");
+		helper.succeed();
+	}
+
+	@GameTest(maxTicks = 200)
+	public void verifyMarkersRemovesDirectlyBrokenButton(GameTestHelper helper) {
+		Fixture fixture = buildFixture(helper);
+		BlockLocation sign = placeWallSign(helper, HOME_X, 3, Z_SIGN, Direction.NORTH);
+		BlockLocation button = placeWallButton(helper, HOME_X, 2, Z_SIGN, Direction.NORTH);
+		clearRegistration(fixture, sign, button);
+		saveSign(fixture, sign, fixture.player(), fixture.homeName(), fixture.mineName());
+		Station home = station(helper, fixture, fixture.homeName());
+
+		fixture.level().setBlock(RailWorld.pos(button), Blocks.AIR.defaultBlockState(), 3);
+		fixture.railway().signs().verifyMarkers(fixture.server());
+
+		check(helper, state(fixture).binding(fixture.dimension(), button).isEmpty(),
+				"binding survived a directly removed button");
+		SignMarker marker = state(fixture).signMarker(fixture.dimension(), sign).orElse(null);
+		check(helper, marker != null, "anchor marker was removed with a directly removed button");
+		check(helper, marker.isAnchor() && !marker.hasButton(),
+				"anchor marker should keep only the anchor: " + marker);
+		Station after = state(fixture).station(home.id()).orElse(null);
+		check(helper, after != null && after.enabled(), "station should stay enabled after button removal");
+		helper.succeed();
+	}
+
+	@GameTest(maxTicks = 200)
+	public void verifyMarkersKeepsMainAndDisablesOnlyWithTheLastUnit(GameTestHelper helper) {
+		Fixture fixture = buildFixture(helper);
+		BlockLocation homeSign = placeWallSign(helper, HOME_X, 3, Z_SIGN, Direction.NORTH);
+		clearRegistration(fixture, homeSign, absolute(helper, HOME_X, 2, Z_SIGN));
+		saveSign(fixture, homeSign, fixture.player(), fixture.homeName(), "");
+		Station home = station(helper, fixture, fixture.homeName());
+
+		buildPillar(helper, DEST_SIGN_X, DEST_SUPPORT_Z);
+		buildExitPlatform(helper, DEST_SIGN_X, Z_EXIT);
+		ServerPlayer mover = opPlayer(helper, fixture, absolute(helper, DEST_SIGN_X, DOCK_Y, Z_EXIT));
+		BlockLocation mainSign = placeWallSign(helper, DEST_SIGN_X, 3, Z_SIGN, Direction.NORTH);
+		BlockLocation mainButton = placeWallButton(helper, DEST_SIGN_X, 2, Z_SIGN, Direction.NORTH);
+		clearRegistration(fixture, mainSign, mainButton);
+		saveSignWithFlags(fixture, mainSign, mover, fixture.homeName(), fixture.mineName(), "m");
+		BlockLocation mainDock = absolute(helper, DEST_SIGN_X, DOCK_Y, Z_RAIL);
+		BlockLocation mainExit = absolute(helper, DEST_SIGN_X, DOCK_Y, Z_EXIT);
+		check(helper, mainDock.equals(state(fixture).station(home.id()).orElseThrow().dock()),
+				"m did not move main before verification");
+		check(helper, state(fixture).signUnitCount(home.id()) == 2, "unexpected unit count");
+
+		fixture.level().setBlock(RailWorld.pos(mainSign), Blocks.AIR.defaultBlockState(), 3);
+		fixture.railway().signs().verifyMarkers(fixture.server());
+
+		SignMarker anchor = state(fixture).signMarker(fixture.dimension(), homeSign).orElse(null);
+		check(helper, anchor != null, "anchor unit was removed with the main sign");
+		check(helper, state(fixture).mainMarkerForStation(home.id()).isEmpty(),
+				"main flag survived the removed main sign");
+		Station afterMain = state(fixture).station(home.id()).orElseThrow();
+		check(helper, afterMain.enabled(), "station was disabled while another unit remained");
+		check(helper, mainDock.equals(afterMain.dock()) && mainExit.equals(afterMain.exit()),
+				"stored main dock/exit changed when the main unit was removed");
+
+		fixture.level().setBlock(RailWorld.pos(homeSign), Blocks.AIR.defaultBlockState(), 3);
+		fixture.railway().signs().verifyMarkers(fixture.server());
+
+		Station afterLast = state(fixture).station(home.id()).orElse(null);
+		check(helper, afterLast != null, "station data was removed with its last sign");
+		check(helper, state(fixture).signUnitCount(home.id()) == 0, "marker left after last unit removal");
+		check(helper, !afterLast.enabled(), "station was not disabled after its last unit disappeared");
+		check(helper, mainDock.equals(afterLast.dock()) && mainExit.equals(afterLast.exit()),
+				"station main dock/exit was lost with its last unit");
+		helper.succeed();
+	}
+
 	// --------------------------------------------------------------- fixtures
 
 	private record Fixture(

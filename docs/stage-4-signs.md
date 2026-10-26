@@ -101,6 +101,24 @@ line 3: <to>            required unless this is a station-only anchor
 - Registration is denied to non-builders; default permission is OP level 2. Do not
   consume or clear the sign text on failure.
 
+### Builder permission and config
+
+`config/railway.json` accepts an optional `builders` array of player UUID strings:
+
+```json
+"builders": ["123e4567-e89b-12d3-a456-426614174000"]
+```
+
+- OP level 2 (gamemaster) may always register signs; the list adds individual players
+  without granting OP.
+- The list defaults to empty, so an absent or `null` key keeps OP-2-only behavior.
+- Every entry must be a valid UUID string. Invalid entries and duplicates (ignoring
+  case) make the config invalid with a `builders[n]` diagnostic; the file is never
+  rewritten and Railway is disabled as for any other invalid setting.
+- The key does not require a `configVersion` bump. It is additive and optional: old
+  files without the key remain valid (empty list), and the same version reads files
+  that contain it. A bump would falsely invalidate existing installations.
+
 ## Registration flow
 
 For every valid unit:
@@ -172,6 +190,11 @@ the second sign at Mine.
   same marker.
 - Piston movement is unsupported. Moving marker blocks invalidates the registration;
   never silently follow moved blocks.
+- Every 40 server ticks Railway revalidates loaded markers. A marker whose sign is
+  missing/not a wall sign/detached from its support/facing a non-solid support, or
+  whose button is missing/not stone/not attached to the recorded column, is handled
+  exactly like the corresponding break. Markers in unloaded chunks are skipped, and
+  their positions are never searched for moved blocks.
 - The mod never removes a player's dock, platform, pillar, or unrelated signs.
 - Redstone/powered rails keep existing behavior; sign registration and launches do not
   bypass reservation, trust, or trip rules.

@@ -34,6 +34,8 @@ public final class RailwayMod implements ModInitializer {
 	public static final Logger LOGGER = LoggerFactory.getLogger(MOD_ID);
 
 	private static final Map<UUID, Integer> LAST_PRESS_TICK = new HashMap<>();
+	/** Marker verification cadence; low frequency keeps the check off the hot path. */
+	private static final int MARKER_VERIFY_INTERVAL_TICKS = 40;
 
 	@Override
 	public void onInitialize() {
@@ -51,6 +53,9 @@ public final class RailwayMod implements ModInitializer {
 			}
 			railway.scans().tick(server);
 			railway.trips().tick(server);
+			if (server.getTickCount() % MARKER_VERIFY_INTERVAL_TICKS == 0) {
+				railway.signs().verifyMarkers(server);
+			}
 		});
 		UseBlockCallback.EVENT.register(RailwayMod::onUseBlock);
 		PlayerBlockBreakEvents.AFTER.register((level, player, pos, state, blockEntity) -> {

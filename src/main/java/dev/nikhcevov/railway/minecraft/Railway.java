@@ -8,6 +8,8 @@ import dev.nikhcevov.railway.persistence.WorldState;
 
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.server.permissions.Permissions;
 import net.minecraft.world.level.storage.LevelResource;
 
 import org.slf4j.Logger;
@@ -154,6 +156,23 @@ public final class Railway {
 
 	public boolean disabled() {
 		return disabled;
+	}
+
+	/**
+	 * OP level 2 (gamemaster) may always register signs. The optional
+	 * {@code builders} config list grants the same right to specific player UUIDs.
+	 */
+	public boolean isBuilder(ServerPlayer player) {
+		if (player.permissions().hasPermission(Permissions.COMMANDS_GAMEMASTER)) {
+			return true;
+		}
+		String uuid = player.getUUID().toString();
+		for (String builder : config.builders()) {
+			if (builder.equalsIgnoreCase(uuid)) {
+				return true;
+			}
+		}
+		return false;
 	}
 
 	public String disabledReason() {

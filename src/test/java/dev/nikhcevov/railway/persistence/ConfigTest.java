@@ -56,7 +56,17 @@ class ConfigTest {
 				d.configVersion(), d.boardingRadius(), d.boardingDelayTicks(), d.playerCooldownTicks(),
 				d.maxActiveTrips(), maxSpeed, d.acceleration(), d.braking(), d.safetyMargin(),
 				d.maxRailsPerScan(), d.scanRailsPerTick(), d.scanTimeBudgetMs(), d.maxRouteLength(),
-				d.maxManagedChunkTickets(), d.maxTripTicks()
+				d.maxManagedChunkTickets(), d.maxTripTicks(), d.builders()
+		);
+	}
+
+	private static Config withBuilders(List<String> builders) {
+		Config d = Config.defaults();
+		return new Config(
+				d.configVersion(), d.boardingRadius(), d.boardingDelayTicks(), d.playerCooldownTicks(),
+				d.maxActiveTrips(), d.maxSpeed(), d.acceleration(), d.braking(), d.safetyMargin(),
+				d.maxRailsPerScan(), d.scanRailsPerTick(), d.scanTimeBudgetMs(), d.maxRouteLength(),
+				d.maxManagedChunkTickets(), d.maxTripTicks(), builders
 		);
 	}
 
@@ -98,6 +108,7 @@ class ConfigTest {
 		assertEquals(10_000, config.maxRouteLength());
 		assertEquals(128, config.maxManagedChunkTickets());
 		assertEquals(36_000, config.maxTripTicks());
+		assertEquals(List.of(), config.builders(), "no extra builders by default");
 
 		assertEquals(List.of(), config.validate(), "defaults must validate cleanly");
 	}
@@ -128,6 +139,7 @@ class ConfigTest {
 		assertEquals(defaults.maxActiveTrips(), config.maxActiveTrips());
 		assertEquals(defaults.scanRailsPerTick(), config.scanRailsPerTick());
 		assertEquals(defaults.maxTripTicks(), config.maxTripTicks());
+		assertEquals(List.of(), config.builders(), "a missing builders key defaults to an empty list");
 		assertEquals(List.of(), result.warnings());
 	}
 
@@ -190,6 +202,98 @@ class ConfigTest {
 
 		assertFalse(result.errors().isEmpty());
 		assertArrayEquals(original, Files.readAllBytes(file));
+	}
+
+	@Test
+	void builderListLoadsUuidStrings() throws IOException {
+		String builder = "123e4567-e89b-12d3-a456-426614174000";
+		writeConfig("""
+				{
+				  "configVersion": 1,
+				  "builders": ["%s"]
+				}
+				""".formatted(builder));
+
+		Config.LoadResult.Loaded result = loaded(Config.load(configFile()));
+
+		assertEquals(List.of(builder), result.config().builders());
+		assertEquals(List.of(), result.config().validate());
+		assertEquals(List.of(), result.warnings());
+	}
+
+	@Test
+	void invalidBuilderUuidIsInvalidAndFileIsNotRewritten() throws IOException {
+		Path file = writeConfig("""
+				{
+				  "configVersion": 1,
+				  "builders": ["not-a-uuid", "123e4567-e89b-12d3-a456-426614174000"]
+				}
+				""");
+		byte[] original = Files.readAllBytes(file);
+
+		Config.LoadResult.Invalid result = invalid(Config.load(file));
+
+		assertTrue(result.errors().stream().anyMatch(error ->
+						error.startsWith("builders[0]: invalid UUID")),
+				() -> "expected a builders[0] error, got " + result.errors());
+		assertArrayEquals(original, Files.readAllBytes(file));
+	}
+
+	@Test
+	void duplicateBuilderUuidIsRejected() throws IOException {
+		writeConfig("""
+				{
+				  "configVersion": 1,
+				  "builders": [
+				    "123e4567-e89b-12d3-a456-426614174000",
+				    "123E4567-E89B-12D3-A456-426614174000"
+				  ]
+				}
+				""");
+
+		Config.LoadResult.Invalid result = invalid(Config.load(configFile()));
+
+		assertTrue(result.errors().stream().anyMatch(error ->
+						error.startsWith("builders[1]: duplicate UUID")),
+				() -> "expected a duplicate UUID error, got " + result.errors());
+	}
+
+	@Test
+	void buildersMustBeAnArrayOfStrings() throws IOException {
+		writeConfig("""
+				{
+				  "configVersion": 1,
+				  "builders": "123e4567-e89b-12d3-a456-426614174000"
+				}
+				""");
+
+		Config.LoadResult.Invalid result = invalid(Config.load(configFile()));
+
+		assertTrue(result.errors().stream().anyMatch(error -> error.contains("array of UUID strings")),
+				() -> "expected an array error, got " + result.errors());
+	}
+
+	@Test
+	void builderValidationAlsoAppliesToConstructedConfigs() {
+		assertEquals(List.of(),
+				withBuilders(List.of("123e4567-e89b-12d3-a456-426614174000")).validate());
+		assertTrue(withBuilders(List.of("nope")).validate().stream()
+				.anyMatch(error -> error.startsWith("builders[0]:")));
+		assertTrue(withBuilders(List.of(
+				"123e4567-e89b-12d3-a456-426614174000",
+				"123e4567-e89b-12d3-a456-426614174000")).validate().stream()
+				.anyMatch(error -> error.contains("duplicate UUID")));
+	}
+
+	@Test
+	void createdDefaultConfigWritesAnEmptyBuildersArray() throws IOException {
+		Path file = configFile();
+		loaded(Config.load(file));
+
+		String written = Files.readString(file, StandardCharsets.UTF_8);
+
+		assertTrue(written.contains("\"builders\": []"),
+				() -> "expected an empty builders array in " + written);
 	}
 
 	@Test
