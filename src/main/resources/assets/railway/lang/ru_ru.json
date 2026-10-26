@@ -55,6 +55,7 @@
   "error.cannot_place_cart": "Не удалось создать служебную вагонетку.",
   "error.mount_failed": "Не удалось посадить пассажира.",
   "error.world_not_loaded": "Нужные чанки не загружены или не тикают.",
+  "error.chunks_not_ready": "Чанк впереди не готов; поездка безопасно остановлена.",
   "error.internal": "Внутренняя ошибка Railway.",
   "error.not_button_bound": "Эта кнопка не зарегистрирована.",
 

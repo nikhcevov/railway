@@ -1,6 +1,7 @@
 package dev.nikhcevov.railway.minecraft;
 
 import dev.nikhcevov.railway.commands.Messages;
+import dev.nikhcevov.railway.dispatch.ChunkWindow;
 import dev.nikhcevov.railway.dispatch.ReservationManager;
 import dev.nikhcevov.railway.dispatch.RouteResourcePlanner;
 import dev.nikhcevov.railway.domain.Binding;
@@ -52,9 +53,12 @@ public final class TripService {
 	private static final double TURN_SPEED_LIMIT = 4.0;
 	private static final long ORPHAN_SWEEP_INTERVAL = 100;
 	private static final long WARNING_INTERVAL = 100;
+	/** Ticks the cart may wait for the ticket window to become entity-ticking. */
+	private static final int CHUNK_READY_WAIT_TICKS = 100;
 
 	private final Railway railway;
 	private final Logger logger;
+	private final ChunkTicketManager tickets;
 	private final Map<TripId, ActiveTrip> active = new LinkedHashMap<>();
 	private final Map<UUID, TripId> byPlayer = new HashMap<>();
 	private final Map<UUID, TripId> byCart = new HashMap<>();
@@ -68,20 +72,27 @@ public final class TripService {
 		final GraphRoutePlan plan;
 		final MotionProfile profile;
 		final Map<BlockLocation, RailShapeType> requiredSwitches;
+		final List<BlockLocation> route;
+		final Set<ChunkWindow.Key> routeChunks;
 		final double safetyMargin;
 		final long graphRevision;
 		final int maxTripTicks;
+		final int maxChunkTickets;
 		final long departureTick;
 		double speed;
 		int stepIndex;
 		long lastWarningTick;
 		long lastSafeRetryTick;
 		long lastProgressTick;
+		long chunkWaitSinceTick = -1;
+		List<ChunkWindow.Key> ticketWindow = List.of();
+		int ticketWindowStep = -1;
 		double lastX;
 		double lastZ;
 
 		ActiveTrip(Trip trip, Minecart cart, RailWorld world, GraphRoutePlan plan, MotionProfile profile,
-				double safetyMargin, long graphRevision, int maxTripTicks, long departureTick) {
+				double safetyMargin, long graphRevision, int maxTripTicks, long departureTick,
+				int maxChunkTickets) {
 			this.trip = trip;
 			this.cart = cart;
 			this.world = world;
@@ -91,6 +102,14 @@ public final class TripService {
 			this.graphRevision = graphRevision;
 			this.maxTripTicks = maxTripTicks;
 			this.departureTick = departureTick;
+			this.maxChunkTickets = maxChunkTickets;
+			this.route = new ArrayList<>(plan.steps().size());
+			Set<ChunkWindow.Key> chunks = new LinkedHashSet<>();
+			for (RouteStep step : plan.steps()) {
+				route.add(step.pos());
+				chunks.add(ChunkWindow.Key.of(step.pos()));
+			}
+			this.routeChunks = chunks;
 			this.requiredSwitches = new HashMap<>();
 			for (var requirement : plan.switches()) {
 				requiredSwitches.put(requirement.pos(), requirement.requiredShape());
@@ -120,9 +139,10 @@ public final class TripService {
 		}
 	}
 
-	public TripService(Railway railway, Logger logger) {
+	public TripService(Railway railway, Logger logger, ChunkTicketManager tickets) {
 		this.railway = railway;
 		this.logger = logger;
+		this.tickets = tickets;
 	}
 
 	// ------------------------------------------------------------------ launch
@@ -299,7 +319,14 @@ public final class TripService {
 			);
 			ActiveTrip activeTrip = new ActiveTrip(trip, cart, world, plan, profile,
 					config.safetyMargin(), fromGraph.revision(), config.maxTripTicks(),
-					tick + config.boardingDelayTicks());
+					tick + config.boardingDelayTicks(), config.maxManagedChunkTickets());
+			Failure ticketFailure = updateChunkTickets(activeTrip);
+			if (ticketFailure != null) {
+				PlayerActions.discardCart(cart);
+				tickets.release(tripId);
+				reservations.releaseAll(tripId.value());
+				return reject(ticketFailure);
+			}
 			active.put(tripId, activeTrip);
 			byPlayer.put(player.getUUID(), tripId);
 			byCart.put(cart.getUUID(), tripId);
@@ -314,6 +341,7 @@ public final class TripService {
 			if (cart != null) {
 				PlayerActions.discardCart(cart);
 			}
+			tickets.release(tripId);
 			reservations.releaseAll(tripId.value());
 			return reject(FailureCode.INTERNAL, e.getMessage());
 		}
@@ -414,6 +442,11 @@ public final class TripService {
 		switch (trip.phase()) {
 			case BOARDING -> {
 				cart.setDeltaMovement(Vec3.ZERO);
+				Failure ticketFailure = updateChunkTickets(at);
+				if (ticketFailure != null) {
+					abort(at, tick, ticketFailure);
+					return;
+				}
 				if (tick >= at.departureTick) {
 					Failure ready = at.world.validateGraphRoute(at.plan);
 					if (ready == null) {
@@ -457,6 +490,34 @@ public final class TripService {
 			current = at.plan.steps().get(at.stepIndex);
 		}
 
+		RouteStep next = at.stepIndex + 1 < at.plan.steps().size()
+				? at.plan.steps().get(at.stepIndex + 1) : null;
+		Failure ticketFailure = updateChunkTickets(at);
+		if (ticketFailure != null) {
+			abort(at, tick, ticketFailure);
+			return;
+		}
+		BlockLocation blocked = null;
+		if (!tickets.isPositionReady(at.trip.id(), at.world.level(), current.pos())) {
+			blocked = current.pos();
+		} else if (next != null && !tickets.isPositionReady(at.trip.id(), at.world.level(), next.pos())) {
+			blocked = next.pos();
+		}
+		if (blocked != null) {
+			cart.setDeltaMovement(Vec3.ZERO);
+			at.speed = 0;
+			// A deliberate wait is not a stuck cart; the readiness timeout below
+			// owns this failure instead of the generic no-progress check.
+			at.lastProgressTick = tick;
+			if (at.chunkWaitSinceTick < 0) {
+				at.chunkWaitSinceTick = tick;
+			} else if (tick - at.chunkWaitSinceTick > CHUNK_READY_WAIT_TICKS) {
+				abort(at, tick, Failure.at(FailureCode.CHUNKS_NOT_READY, blocked));
+			}
+			return;
+		}
+		at.chunkWaitSinceTick = -1;
+
 		Failure upcomingFailure = ensureUpcomingSwitches(at);
 		if (upcomingFailure != null) {
 			abort(at, tick, upcomingFailure);
@@ -467,8 +528,6 @@ public final class TripService {
 			abort(at, tick, currentFailure);
 			return;
 		}
-		RouteStep next = at.stepIndex + 1 < at.plan.steps().size()
-				? at.plan.steps().get(at.stepIndex + 1) : null;
 		if (next != null) {
 			Failure nextFailure = ensureStepShape(at, next, false);
 			if (nextFailure != null) {
@@ -511,6 +570,34 @@ public final class TripService {
 		applyVelocity(at, cart, current, next);
 	}
 
+	/**
+	 * Reconciles the cart's local ticket window. Only chunks covered by the
+	 * scanned route are ever ticketed, so a ticket cannot target an unknown chunk.
+	 */
+	private Failure updateChunkTickets(ActiveTrip at) {
+		if (at.maxChunkTickets <= 0) {
+			return null;
+		}
+		if (at.ticketWindowStep != at.stepIndex) {
+			double distance = at.profile.brakingDistance(at.profile.maxSpeed())
+					+ at.safetyMargin
+					+ at.profile.maxSpeed() * MotionProfile.TICK_SECONDS;
+			ChunkWindow.Window window = ChunkWindow.compute(at.route, at.stepIndex, distance,
+					at.maxChunkTickets);
+			if (window.overBudget()) {
+				return Failure.detail(FailureCode.CHUNKS_NOT_READY, "ticket budget " + at.maxChunkTickets);
+			}
+			at.ticketWindow = window.chunks();
+			at.ticketWindowStep = at.stepIndex;
+		}
+		ChunkTicketManager.Update update = tickets.update(at.world.level(), at.trip.id(), at.routeChunks,
+				at.ticketWindow, at.maxChunkTickets);
+		if (update instanceof ChunkTicketManager.Update.BudgetExceeded exceeded) {
+			return Failure.detail(FailureCode.CHUNKS_NOT_READY, "ticket budget " + exceeded.budget());
+		}
+		return null;
+	}
+
 	private boolean matchesStep(BlockLocation cartBlock, Minecart cart, RouteStep step) {
 		return cartBlock.x() == step.pos().x()
 				&& cartBlock.z() == step.pos().z()
@@ -523,7 +610,7 @@ public final class TripService {
 		for (int i = at.stepIndex; i <= last; i++) {
 			RouteStep step = at.plan.steps().get(i);
 			RailShapeType required = at.requiredSwitches.get(step.pos());
-			if (required != null && at.world.shapeAt(step.pos()) != required) {
+			if (required != null && at.world.isLoaded(step.pos()) && at.world.shapeAt(step.pos()) != required) {
 				return Failure.at(FailureCode.UNSUPPORTED_GEOMETRY, step.pos(), "turnout changed ahead");
 			}
 		}
@@ -721,6 +808,7 @@ public final class TripService {
 	}
 
 	private void removeTrip(ActiveTrip at) {
+		tickets.release(at.trip.id());
 		active.remove(at.trip.id());
 		byPlayer.remove(at.trip.playerUuid(), at.trip.id());
 		byCart.remove(at.cart.getUUID(), at.trip.id());
@@ -741,6 +829,7 @@ public final class TripService {
 	private void quarantineAndRemove(ActiveTrip at, String reason) {
 		int count = reservations.quarantineAll(at.trip.id().value(), at.cart.getUUID(), reason);
 		logger.warn("Trip {} quarantined {} resource(s): {}", at.trip.id(), count, reason);
+		tickets.release(at.trip.id());
 		active.remove(at.trip.id());
 		byPlayer.remove(at.trip.playerUuid());
 		byCart.remove(at.cart.getUUID());
@@ -749,6 +838,7 @@ public final class TripService {
 	}
 
 	private void releaseAndRemove(ActiveTrip at) {
+		tickets.release(at.trip.id());
 		active.remove(at.trip.id());
 		byPlayer.remove(at.trip.playerUuid());
 		byCart.remove(at.cart.getUUID());
@@ -829,6 +919,7 @@ public final class TripService {
 	public void shutdown() {
 		for (ActiveTrip at : List.copyOf(active.values())) {
 			PlayerActions.discardCart(at.cart);
+			tickets.release(at.trip.id());
 			reservations.releaseAll(at.trip.id().value());
 			railway.state().removeTrip(at.trip.id());
 		}
@@ -836,6 +927,7 @@ public final class TripService {
 		byPlayer.clear();
 		byCart.clear();
 		cooldowns.clear();
+		tickets.releaseAll();
 		railway.saveState();
 	}
 

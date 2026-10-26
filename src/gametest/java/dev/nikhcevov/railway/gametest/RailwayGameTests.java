@@ -236,6 +236,77 @@ public final class RailwayGameTests implements CustomTestMethodInvoker {
 		});
 	}
 
+	@GameTest(maxTicks = 600)
+	public void ticketWindowIsHeldWhileRunningAndReleasedOnArrival(GameTestHelper helper) {
+		Fixture fixture = buildFixture(helper, "k");
+		ServerPlayer player = fixture.newPlayer(helper, fixture.homeExit);
+		TripId[] trip = {null};
+		boolean[] ticketObserved = {false};
+		boolean[] readinessObserved = {false};
+		startWhenFree(helper, fixture, player, fixture.homeToMine, trip);
+		helper.onEachTick(() -> {
+			if (trip[0] == null || !tripActive(fixture.railway(), trip[0])) {
+				return;
+			}
+			if (fixture.railway().tickets().tripTicketCount(trip[0]) < 1) {
+				throw helper.assertionException("active trip holds no chunk tickets");
+			}
+			ticketObserved[0] = true;
+			var stats = fixture.railway().tickets().stats(trip[0]).orElseThrow();
+			if (stats.readinessChecks() > 0) {
+				readinessObserved[0] = true;
+			}
+		});
+		helper.succeedWhen(() -> {
+			requireStarted(helper, trip);
+			requireTripFinished(helper, fixture.railway(), trip[0]);
+			if (!ticketObserved[0]) {
+				throw helper.assertionException("ticket window was never observed");
+			}
+			if (!readinessObserved[0]) {
+				throw helper.assertionException("entity-ticking readiness was never consulted");
+			}
+			if (fixture.railway().tickets().tripTicketCount(trip[0]) != 0) {
+				throw helper.assertionException("arrival leaked chunk tickets");
+			}
+			if (fixture.railway().tickets().stats(trip[0]).isPresent()) {
+				throw helper.assertionException("ticket state survived arrival");
+			}
+			requireNoManagedCart(helper, fixture.level());
+		});
+	}
+
+	@GameTest(maxTicks = 600)
+	public void ticketsAreReleasedWhenTheTripIsAborted(GameTestHelper helper) {
+		Fixture fixture = buildFixture(helper, "u");
+		ServerPlayer player = fixture.newPlayer(helper, fixture.homeExit);
+		TripId[] trip = {null};
+		int[] startedTick = {-1};
+		boolean[] left = {false};
+		startWhenFree(helper, fixture, player, fixture.homeToMine, trip, startedTick);
+		helper.onEachTick(() -> {
+			if (trip[0] == null || left[0]) {
+				return;
+			}
+			if (fixture.railway().server().getTickCount() - startedTick[0] < 15) {
+				return;
+			}
+			if (fixture.railway().tickets().tripTicketCount(trip[0]) < 1) {
+				throw helper.assertionException("trip lost its chunk tickets before abort");
+			}
+			fixture.railway().trips().playerLeft(player.getUUID());
+			left[0] = true;
+		});
+		helper.succeedWhen(() -> {
+			requireStarted(helper, trip);
+			requireTripFinished(helper, fixture.railway(), trip[0]);
+			if (fixture.railway().tickets().tripTicketCount(trip[0]) != 0) {
+				throw helper.assertionException("abort leaked chunk tickets");
+			}
+			requireNoManagedCart(helper, fixture.level());
+		});
+	}
+
 	// ----------------------------------------------------------------- fixture
 
 	private record Fixture(Railway railway, ServerLevel level, Station home, Station mine,

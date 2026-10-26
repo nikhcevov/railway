@@ -18,6 +18,7 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.entity.vehicle.minecart.AbstractMinecart;
+import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.block.BaseRailBlock;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
@@ -126,6 +127,21 @@ public final class RailWorld implements GraphRailView {
 		return graphProbe(location) instanceof Probe.Rail rail ? rail.shape() : null;
 	}
 
+	public boolean isLoaded(BlockLocation location) {
+		return level.isLoaded(pos(location));
+	}
+
+	/**
+	 * Full motion readiness: the chunk is loaded, in the entity-ticking range and
+	 * its entity section is actually loaded. Loaded state alone is not enough.
+	 */
+	public boolean isPositionReady(BlockLocation location) {
+		BlockPos pos = pos(location);
+		return level.isLoaded(pos)
+				&& level.isPositionEntityTicking(pos)
+				&& level.areEntitiesActuallyLoadedAndTicking(ChunkPos.containing(pos));
+	}
+
 	/**
 	 * Writes a rail shape without neighbor updates and verifies the result by
 	 * re-reading it. The command/API result is not trusted (observed to report
@@ -156,8 +172,7 @@ public final class RailWorld implements GraphRailView {
 		}
 		for (RouteStep step : plan.steps()) {
 			BlockLocation location = step.pos();
-			BlockPos pos = pos(location);
-			if (!level.isLoaded(pos) || !level.isPositionEntityTicking(pos)) {
+			if (!isPositionReady(location)) {
 				return Failure.at(FailureCode.WORLD_NOT_LOADED, location);
 			}
 			if (!(graphProbe(location) instanceof Probe.Rail rail)) {

@@ -29,6 +29,7 @@ public final class Railway {
 	private WorldState state;
 	private StateStore store;
 	private ScanService scans;
+	private ChunkTicketManager tickets;
 	private TripService trips;
 	private SignRegistrationService signs;
 	private boolean disabled;
@@ -93,7 +94,8 @@ public final class Railway {
 		}
 
 		scans = new ScanService(LOGGER);
-		trips = new TripService(this, LOGGER);
+		tickets = new ChunkTicketManager(LOGGER);
+		trips = new TripService(this, LOGGER, tickets);
 		signs = new SignRegistrationService(this, LOGGER);
 		store = new JsonStateStore(server.getWorldPath(LevelResource.ROOT));
 		try {
@@ -110,6 +112,7 @@ public final class Railway {
 
 		if (stateLoaded && !state.trips().isEmpty()) {
 			LOGGER.warn("Recovering {} interrupted trip checkpoint(s); they will not continue", state.trips().size());
+			tickets.releaseAll();
 			state.setTrips(List.of());
 			if (!disabled) {
 				saveState();
@@ -123,6 +126,9 @@ public final class Railway {
 	public void shutdown() {
 		if (trips != null) {
 			trips.shutdown();
+		}
+		if (tickets != null) {
+			tickets.releaseAll();
 		}
 		if (scans != null) {
 			scans.clear();
@@ -148,6 +154,10 @@ public final class Railway {
 
 	public TripService trips() {
 		return trips;
+	}
+
+	public ChunkTicketManager tickets() {
+		return tickets;
 	}
 
 	public SignRegistrationService signs() {

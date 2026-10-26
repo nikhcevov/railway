@@ -55,6 +55,7 @@
   "error.cannot_place_cart": "Could not place the service cart.",
   "error.mount_failed": "Could not seat the passenger.",
   "error.world_not_loaded": "The required chunks are not loaded or not ticking.",
+  "error.chunks_not_ready": "The chunk ahead is not ready; the trip was stopped safely.",
   "error.internal": "Internal Railway error.",
   "error.not_button_bound": "This button is not registered.",
 
