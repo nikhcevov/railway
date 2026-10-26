@@ -1,0 +1,178 @@
+# Operations and recovery
+
+This page covers running a Railway server: diagnostics, chunk readiness, restart
+recovery, failures, and removal.
+
+## Diagnostics
+
+```text
+/rail diagnostics
+/rail diagnostics <stationId>
+```
+
+OP level 2; works from console and players. It is read-only.
+
+Global output:
+
+- enabled/disabled state and reason;
+- state loaded/revision and interrupted-checkpoint count;
+- active trips: phase, from/to, player/cart UUIDs, graph revision/component/length,
+  docks, ticket readiness, abort reason;
+- reservation ownership and quarantined resources;
+- scan jobs and graph status;
+- managed chunk tickets: held/budget, pending, recovery tickets;
+- recovery: pending/blocking, checkpoints removed, carts discarded/stopped/
+  preserved, storage probes, late-chunk passes, deadlines.
+
+Per-station output adds:
+
+- display name, dimension, dock, exit, enabled, revision, provisional state;
+- sign-unit count and current main marker (or main fallback);
+- bindings and local source docks;
+- scan/graph status.
+
+Use this first for any route, ticket, recovery, or station problem.
+
+## Chunk tickets and readiness
+
+Railway keeps a **local** ticket window, not the whole route:
+
+- current route step chunk plus the braking/safety window ahead;
+- bounded by `maxManagedChunkTickets`; `0` disables tickets;
+- acquired per trip, updated as the cart advances, released on arrival, abort,
+  disconnect, or shutdown;
+- tickets are non-persistent and expire if unloaded;
+- readiness requires loaded + entity-ticking + entity section loaded, not just
+  `isLoaded`.
+
+If the next chunk is not ready, the cart is stopped and waits. After a bounded
+wait it aborts safely with `CHUNKS_NOT_READY`; there is no teleport and no forced
+new terrain.
+
+Launch validation treats unloaded route tails as known from the scan. Loaded
+portions are validated at launch; unloaded portions, target exit, and turnouts are
+validated when the ticket window reaches them. This allows a route to start outside
+the currently loaded area.
+
+### Generation caveat
+
+Railway requests tickets only for route chunks proven by the scanned graph and
+does not call force-load or generation APIs. Vanilla ticket propagation can still
+load an adjacent missing chunk at the radius boundary. A strict no-generation
+guarantee would require replacing vanilla ticket propagation. This is a known
+limitation of the current build.
+
+## Restart and recovery
+
+State checkpoints are stored in world state schema 4 with:
+
+- trip/player/cart UUIDs, from/to stations, phase, started tick;
+- dimension and last checkpointed cart position.
+
+### Clean shutdown
+
+Active trips are stopped, carts are discarded, their checkpoints are removed, and
+state is saved. A normal restart has no active trips.
+
+### Crash recovery
+
+After an unclean stop:
+
+- checkpoints are not discarded at startup;
+- new trips are blocked with `RECOVERY_PENDING` while unresolved checkpoints exist;
+- for each checkpoint Railway looks for the service cart by UUID in loaded levels;
+- if the recorded chunk is not loaded but exists on disk, one bounded
+  non-persistent recovery ticket is requested; no new chunks are generated;
+- an empty managed cart is discarded and the checkpoint is closed;
+- an occupied managed cart is left safely stopped; the checkpoint stays until it
+  becomes empty or reaches the deadline;
+- an unmanaged/user cart with a matching UUID is preserved, with a diagnostic;
+- an absent cart with a loaded/missing chunk closes the checkpoint;
+- a chunk that is not yet loaded is reconciled by the late-chunk status event or
+  the orphan sweep;
+- the deadline is 1,200 ticks; after that the checkpoint drops and late entities
+  are left to the orphan sweep.
+
+Trips **never resume automatically**. Players are never teleported to an
+unconfirmed exit. On join, a recovered managed cart is stopped in place instead
+of being teleported or force-dismounted.
+
+Recovery tickets and state are reported by `/rail diagnostics`.
+
+## Reservations and quarantine
+
+- Route resources are acquired atomically before spawn; no waiting queue.
+- A blocked resource returns `PATH_OCCUPIED`, `RESERVATION_CONFLICT`, or
+  `DOCK_OCCUPIED`.
+- If a service cart's removal cannot be confirmed, the trip's resources enter
+  quarantine. They stay unavailable until reconciliation by cart UUID confirms
+  the cart is gone.
+- An orphan tagged cart is removed only after its trip/checkpoint is no longer
+  pending. Ordinary user carts are never touched.
+
+## Failure reference
+
+| Code | Typical cause / action |
+|---|---|
+| `STATION_NOT_FOUND` | Wrong ID; use `/rail station list` |
+| `STATION_INCOMPLETE` | No exit, or provisional destination not anchored |
+| `STATION_DISABLED` | Enable the station |
+| `DESTINATION_NOT_ANCHORED` | Save the destination's return sign |
+| `SCAN_INCOMPLETE` / `SCAN_RUNNING` | `/rail network scan <station>` and wait |
+| `SCAN_FAILED` | Inspect scan status; fix rail load/geometry |
+| `NO_RAIL` / `UNSUPPORTED_RAIL` / `UNSUPPORTED_GEOMETRY` | Fix rail or dock; inspect `/rail diagnostics` |
+| `NO_PATH` | Graph disconnected or different revisions; rescan |
+| `BUTTON_REPLACED` | Re-register the sign/button |
+| `PLAYER_TOO_FAR` | Move within the sign/main boarding envelope |
+| `DOCK_OCCUPIED` / `PATH_OCCUPIED` / `RESERVATION_CONFLICT` | Another trip owns the resource; retry |
+| `EXIT_UNSAFE` | Set a safe platform exit |
+| `TRIP_LIMIT` | Raise `maxActiveTrips` or wait |
+| `CHUNKS_NOT_READY` | Ticket window did not become entity-ticking in time |
+| `RECOVERY_PENDING` | Wait for startup/late-chunk reconciliation |
+| `INTERNAL` | Check server log and `/rail diagnostics`; report reproduction |
+
+## Backups and removal
+
+Before upgrading, stop the server and back up the world. Migrations create
+`<world>/railway/state.vN.bak` automatically.
+
+To remove Railway:
+
+1. Close active trips or stop the server; clean shutdown removes service carts.
+2. Back up the world.
+3. Remove the Railway jar and optionally `config/railway.json`.
+4. Restart. Signs, rails, buttons, and platforms remain vanilla. `railway/state.json`
+   is ignored by vanilla.
+
+The Stage 5 acceptance run loaded a copied world on a vanilla 26.1.2 server and
+reached `Done` successfully.
+
+## Limits and performance
+
+- Config limits: `maxActiveTrips`, `maxManagedChunkTickets`, `maxRouteLength`,
+  scan budgets, `maxTripTicks`.
+- Ticket window size is local; not a whole-route force-load.
+- Scans run in tick-batched jobs and are not persisted; rescan after restart if
+  needed.
+- Diagnostics output is unpaginated chat.
+- Large networks can produce long `/rail diagnostics` output and many scan jobs.
+
+## Acceptance status
+
+Verified:
+
+- 217 unit tests and 49 GameTests;
+- live diagnostics;
+- live startup recovery with a tagged cart + checkpoint;
+- vanilla world load without Railway;
+- schema 4 migration and backup.
+
+Not fully proven:
+
+- a true long route beyond simulation distance with a real client;
+- a true mid-trip `kill -9` (startup checkpoint recovery was exercised with a real
+  tagged entity);
+- non-OP builder acceptance in a live config;
+- a separate Fabric-modpack removal run.
+
+See [`stage-5-report.md`](stage-5-report.md).
