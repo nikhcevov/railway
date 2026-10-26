@@ -2,6 +2,7 @@ package dev.nikhcevov.railway.minecraft;
 
 import dev.nikhcevov.railway.commands.Messages;
 import dev.nikhcevov.railway.dispatch.ReservationManager;
+import dev.nikhcevov.railway.dispatch.RouteResourcePlanner;
 import dev.nikhcevov.railway.domain.Binding;
 import dev.nikhcevov.railway.domain.BlockLocation;
 import dev.nikhcevov.railway.domain.Failure;
@@ -65,6 +66,7 @@ public final class TripService {
 		final GraphRoutePlan plan;
 		final MotionProfile profile;
 		final Map<BlockLocation, RailShapeType> requiredSwitches;
+		final long graphRevision;
 		final int maxTripTicks;
 		final long departureTick;
 		double speed;
@@ -76,12 +78,13 @@ public final class TripService {
 		double lastZ;
 
 		ActiveTrip(Trip trip, Minecart cart, RailWorld world, GraphRoutePlan plan, MotionProfile profile,
-				int maxTripTicks, long departureTick) {
+				long graphRevision, int maxTripTicks, long departureTick) {
 			this.trip = trip;
 			this.cart = cart;
 			this.world = world;
 			this.plan = plan;
 			this.profile = profile;
+			this.graphRevision = graphRevision;
 			this.maxTripTicks = maxTripTicks;
 			this.departureTick = departureTick;
 			this.requiredSwitches = new HashMap<>();
@@ -190,8 +193,15 @@ public final class TripService {
 		}
 		RailGraph fromGraph = ((GraphLookup.Found) fromLookup).graph();
 		RailGraph toGraph = ((GraphLookup.Found) toLookup).graph();
-		if (!fromGraph.componentKey().equals(toGraph.componentKey())) {
+		if (!fromGraph.componentKey().equals(toGraph.componentKey())
+				|| fromGraph.revision() != toGraph.revision()) {
 			return reject(Failure.of(FailureCode.NO_PATH));
+		}
+		for (ActiveTrip other : active.values()) {
+			if (other.plan.componentKey().equals(fromGraph.componentKey())
+					&& other.graphRevision != fromGraph.revision()) {
+				return reject(Failure.detail(FailureCode.RESERVATION_CONFLICT, "topology changed"));
+			}
 		}
 
 		RailGraphPlanner.Result planned = RailGraphPlanner.plan(fromGraph, from.id(), to.id(),
@@ -216,12 +226,25 @@ public final class TripService {
 		}
 
 		TripId tripId = TripId.random();
-		if (!reservations.tryAcquire(List.of(plan.componentKey()), tripId.value())) {
-			return reject(FailureCode.RESERVATION_CONFLICT, plan.componentKey());
+		java.util.Set<BlockLocation> docks = new java.util.HashSet<>();
+		for (Station station : railway.state().stations()) {
+			docks.add(station.dock());
+		}
+		List<String> resources = RouteResourcePlanner.derive(fromGraph, plan, docks);
+		String blocked = null;
+		for (String resource : resources) {
+			if (!reservations.isFree(resource)) {
+				blocked = resource;
+				break;
+			}
+		}
+		if (blocked != null || !reservations.tryAcquire(resources, tripId.value())) {
+			return reject(Failure.detail(FailureCode.RESERVATION_CONFLICT,
+					blocked == null ? "resource conflict" : blocked));
 		}
 		Failure switchFailure = world.prepareSwitches(plan);
 		if (switchFailure != null) {
-			reservations.release(plan.componentKey(), tripId.value());
+			reservations.releaseAll(tripId.value());
 			return reject(switchFailure);
 		}
 
@@ -229,12 +252,12 @@ public final class TripService {
 		try {
 			cart = PlayerActions.spawnServiceCart(level, plan.fromDock(), tripId);
 			if (cart == null) {
-				reservations.release(plan.componentKey(), tripId.value());
+				reservations.releaseAll(tripId.value());
 				return reject(FailureCode.CANNOT_PLACE_CART, null);
 			}
 			if (!PlayerActions.mount(player, cart)) {
 				PlayerActions.discardCart(cart);
-				reservations.release(plan.componentKey(), tripId.value());
+				reservations.releaseAll(tripId.value());
 				return reject(FailureCode.MOUNT_FAILED, null);
 			}
 
@@ -247,7 +270,7 @@ public final class TripService {
 					0.1
 			);
 			ActiveTrip activeTrip = new ActiveTrip(trip, cart, world, plan, profile,
-					config.maxTripTicks(), tick + config.boardingDelayTicks());
+					fromGraph.revision(), config.maxTripTicks(), tick + config.boardingDelayTicks());
 			active.put(tripId, activeTrip);
 			byPlayer.put(player.getUUID(), tripId);
 			byCart.put(cart.getUUID(), tripId);
@@ -262,7 +285,7 @@ public final class TripService {
 			if (cart != null) {
 				PlayerActions.discardCart(cart);
 			}
-			reservations.release(plan.componentKey(), tripId.value());
+			reservations.releaseAll(tripId.value());
 			return reject(FailureCode.INTERNAL, e.getMessage());
 		}
 	}
@@ -331,6 +354,7 @@ public final class TripService {
 
 		if (player == null) {
 			logger.info("Trip {} ended: player offline", trip.id());
+			PlayerActions.discardCart(at.cart);
 			releaseAndRemove(at);
 			return;
 		}

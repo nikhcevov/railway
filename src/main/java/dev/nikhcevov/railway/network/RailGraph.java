@@ -206,6 +206,17 @@ public final class RailGraph {
 		return edges.getOrDefault(state, List.of());
 	}
 
+	public Set<BlockLocation> adjacentRails(BlockLocation pos) {
+		Set<BlockLocation> adjacent = new LinkedHashSet<>();
+		for (RailPort port : RailPort.values()) {
+			RailState state = new RailState(pos, port);
+			for (Edge edge : neighbors(state)) {
+				adjacent.add(edge.to().pos());
+			}
+		}
+		return adjacent;
+	}
+
 	public Set<BlockLocation> switches() {
 		Set<BlockLocation> switches = new LinkedHashSet<>();
 		for (GraphRail rail : rails.values()) {
