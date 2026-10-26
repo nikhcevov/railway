@@ -2,6 +2,7 @@ package dev.nikhcevov.railway.gametest;
 
 import dev.nikhcevov.railway.domain.Binding;
 import dev.nikhcevov.railway.domain.BlockLocation;
+import dev.nikhcevov.railway.domain.FailureCode;
 import dev.nikhcevov.railway.domain.Station;
 import dev.nikhcevov.railway.domain.StationId;
 import dev.nikhcevov.railway.domain.TripId;
@@ -29,6 +30,7 @@ import net.minecraft.world.level.entity.EntityTypeTest;
 
 import java.lang.reflect.Method;
 import java.util.List;
+import java.util.Set;
 
 /**
  * Stage-2 end-to-end tests: a three-station T network, a curve+slope trip and
@@ -188,6 +190,63 @@ public final class TurnoutGameTests implements CustomTestMethodInvoker {
 				throw helper.assertionException("turnout was silently rewritten");
 			}
 			requireNoManagedCart(helper, level);
+		});
+	}
+
+
+	@GameTest(maxTicks = 1200)
+	public void conflictingDestinationsDoNotOverwriteTurnout(GameTestHelper helper) {
+		Railway railway = Railway.get();
+		ServerLevel level = helper.getLevel();
+		MinecraftServer server = level.getServer();
+		Network network = buildNetwork(helper);
+		scan(helper, railway.scans(), network.home(), level, server);
+		scan(helper, railway.scans(), network.east(), level, server);
+		scan(helper, railway.scans(), network.south(), level, server);
+
+		ServerPlayer firstPlayer = helper.makeMockServerPlayerInLevel();
+		firstPlayer.teleportTo(network.homeExit().x() + 0.5, network.homeExit().y(),
+				network.homeExit().z() + 0.5);
+		ServerPlayer secondPlayer = helper.makeMockServerPlayerInLevel();
+		secondPlayer.teleportTo(network.homeExit().x() + 0.5, network.homeExit().y(),
+				network.homeExit().z() + 0.5);
+
+		String dimension = RailWorld.dimension(level);
+		Binding toSouth = new Binding(dimension, network.button(), BUTTON_ID,
+				network.home().id(), network.south().id());
+		Binding toEast = new Binding(dimension, network.button(), BUTTON_ID,
+				network.home().id(), network.east().id());
+		TripId[] first = {null};
+		helper.onEachTick(() -> {
+			if (first[0] == null) {
+				if (railway.trips().activeCount() >= railway.config().maxActiveTrips() - 1) {
+					return;
+				}
+				TripService.StartResult started = railway.trips().start(firstPlayer, toSouth);
+				if (started instanceof TripService.StartResult.Rejected rejected) {
+					throw helper.assertionException("first trip rejected: " + rejected.failure().code());
+				}
+				first[0] = ((TripService.StartResult.Started) started).id();
+
+				TripService.StartResult second = railway.trips().start(secondPlayer, toEast);
+				if (!(second instanceof TripService.StartResult.Rejected rejected)) {
+					throw helper.assertionException("second trip unexpectedly started");
+				}
+				Set<FailureCode> expected = Set.of(FailureCode.DOCK_OCCUPIED, FailureCode.PATH_OCCUPIED,
+						FailureCode.RESERVATION_CONFLICT);
+				if (!expected.contains(rejected.failure().code())) {
+					throw helper.assertionException("unexpected second rejection: " + rejected.failure().code());
+				}
+				if (new RailWorld(level).shapeAt(network.junction()) != RailShapeType.SOUTH_WEST) {
+					throw helper.assertionException("second request overwrote the selected turnout");
+				}
+				return;
+			}
+			if (tripActive(railway, first[0])) {
+				return;
+			}
+			requireNoManagedCart(helper, level);
+			helper.succeed();
 		});
 	}
 

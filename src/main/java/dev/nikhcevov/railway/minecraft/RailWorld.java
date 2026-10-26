@@ -185,31 +185,23 @@ public final class RailWorld implements GraphRailView {
 	}
 
 	public boolean isPathOccupied(GraphRoutePlan plan, UUID passengerUuid, UUID cartUuid) {
-		int minX = Integer.MAX_VALUE;
-		int minY = Integer.MAX_VALUE;
-		int minZ = Integer.MAX_VALUE;
-		int maxX = Integer.MIN_VALUE;
-		int maxY = Integer.MIN_VALUE;
-		int maxZ = Integer.MIN_VALUE;
 		for (RouteStep step : plan.steps()) {
-			minX = Math.min(minX, step.pos().x());
-			minY = Math.min(minY, step.pos().y());
-			minZ = Math.min(minZ, step.pos().z());
-			maxX = Math.max(maxX, step.pos().x());
-			maxY = Math.max(maxY, step.pos().y());
-			maxZ = Math.max(maxZ, step.pos().z());
+			BlockPos pos = pos(step.pos());
+			AABB box = new AABB(pos.getX() + 0.25, pos.getY() - 0.1, pos.getZ() + 0.25,
+					pos.getX() + 0.75, pos.getY() + 1.5, pos.getZ() + 0.75);
+			if (!level.getEntities((Entity) null, box, entity -> {
+				if (entity.getUUID().equals(passengerUuid)) {
+					return false;
+				}
+				if (entity instanceof AbstractMinecart cart) {
+					return !cart.getUUID().equals(cartUuid);
+				}
+				return entity instanceof LivingEntity;
+			}).isEmpty()) {
+				return true;
+			}
 		}
-		AABB box = new AABB(minX - 0.5, minY - 0.5, minZ - 0.5,
-				maxX + 1.5, maxY + 2.0, maxZ + 1.5);
-		return !level.getEntities((Entity) null, box, entity -> {
-			if (entity.getUUID().equals(passengerUuid)) {
-				return false;
-			}
-			if (entity instanceof AbstractMinecart cart) {
-				return !cart.getUUID().equals(cartUuid);
-			}
-			return entity instanceof LivingEntity;
-		}).isEmpty();
+		return false;
 	}
 
 	public static RailShape vanillaShape(RailShapeType shape) {
