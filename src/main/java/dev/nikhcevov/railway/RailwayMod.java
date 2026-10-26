@@ -54,8 +54,10 @@ public final class RailwayMod implements ModInitializer {
 		});
 		UseBlockCallback.EVENT.register(RailwayMod::onUseBlock);
 		PlayerBlockBreakEvents.AFTER.register((level, player, pos, state, blockEntity) -> {
-			if (!level.isClientSide() && Railway.isStarted()) {
-				Railway.get().scans().invalidate(RailWorld.loc(pos));
+			if (level instanceof net.minecraft.server.level.ServerLevel serverLevel && Railway.isStarted()) {
+				Railway railway = Railway.get();
+				railway.scans().invalidate(RailWorld.loc(pos));
+				railway.signs().onBlockBreak(serverLevel, pos, state, blockEntity);
 			}
 		});
 		ServerPlayConnectionEvents.DISCONNECT.register((handler, server) -> {

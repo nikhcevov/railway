@@ -44,13 +44,13 @@ public final class ParallelGameTests implements CustomTestMethodInvoker {
 		BlockLocation button = absolute(helper, 0, 1, 3);
 		level.setBlock(RailWorld.pos(button), Blocks.STONE_BUTTON.defaultBlockState(), 2);
 
-		Station a = station(railway, "pa" + unique, "A", dimension,
+		Station a = station(railway, "pa" + unique, "A " + unique, dimension,
 				absolute(helper, 0, 1, 0), absolute(helper, 0, 1, 2));
-		Station b = station(railway, "pb" + unique, "B", dimension,
+		Station b = station(railway, "pb" + unique, "B " + unique, dimension,
 				absolute(helper, 5, 1, 0), absolute(helper, 5, 1, 2));
-		Station c = station(railway, "pc" + unique, "C", dimension,
+		Station c = station(railway, "pc" + unique, "C " + unique, dimension,
 				absolute(helper, 0, 1, 4), absolute(helper, 0, 1, 6));
-		Station d = station(railway, "pd" + unique, "D", dimension,
+		Station d = station(railway, "pd" + unique, "D " + unique, dimension,
 				absolute(helper, 5, 1, 4), absolute(helper, 5, 1, 6));
 		for (Station station : new Station[]{a, b, c, d}) {
 			scan(helper, railway.scans(), station, level, server);

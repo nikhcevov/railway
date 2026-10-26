@@ -11,6 +11,7 @@ import dev.nikhcevov.railway.domain.Failure;
 import dev.nikhcevov.railway.domain.FailureCode;
 import dev.nikhcevov.railway.domain.Station;
 import dev.nikhcevov.railway.domain.StationId;
+import dev.nikhcevov.railway.domain.StationNames;
 import dev.nikhcevov.railway.domain.Trip;
 import dev.nikhcevov.railway.domain.TripId;
 import dev.nikhcevov.railway.minecraft.PlayerActions;
@@ -142,7 +143,7 @@ public final class RailCommand {
 			return 0;
 		}
 		String rawId = StringArgumentType.getString(context, "id");
-		String displayName = StringArgumentType.getString(context, "displayName").trim();
+		String displayName = StationNames.normalize(StringArgumentType.getString(context, "displayName"));
 		if (!StationId.isValid(rawId)) {
 			return fail(context.getSource(), Failure.detail(FailureCode.INVALID_ID, rawId));
 		}
@@ -153,18 +154,22 @@ public final class RailCommand {
 		if (railway.state().station(id).isPresent()) {
 			return fail(context.getSource(), Failure.detail(FailureCode.STATION_EXISTS, rawId));
 		}
+		ServerLevel level = player.level();
+		String dimension = RailWorld.dimension(level);
+		if (railway.state().hasStationNamed(dimension, displayName)) {
+			return fail(context.getSource(), Failure.detail(FailureCode.STATION_NAME_TAKEN, displayName));
+		}
 		BlockLocation dock = targetedBlock(player, context.getSource());
 		if (dock == null) {
 			return 0;
 		}
-		ServerLevel level = player.level();
 		RailWorld world = new RailWorld(level);
 		GraphRailView.Probe probe = world.graphProbe(dock);
 		Failure dockFailure = dockFailure(probe, dock);
 		if (dockFailure != null) {
 			return fail(context.getSource(), dockFailure);
 		}
-		Station station = new Station(id, displayName, RailWorld.dimension(level), dock, null, 0.0F, false,
+		Station station = new Station(id, displayName, dimension, dock, null, 0.0F, false,
 				railway.state().nextRevision());
 		railway.state().addStation(station);
 		railway.saveState();
@@ -180,6 +185,9 @@ public final class RailCommand {
 		Station station = station(context.getSource(), StringArgumentType.getString(context, "id"));
 		if (station == null) {
 			return 0;
+		}
+		if (station.isProvisional()) {
+			return fail(context.getSource(), Failure.detail(FailureCode.STATION_INCOMPLETE, station.displayName()));
 		}
 		ServerLevel level = RailWorld.level(context.getSource().getServer(), station.dimension());
 		if (level == null) {
@@ -205,12 +213,20 @@ public final class RailCommand {
 			return 0;
 		}
 		Station station = station(context.getSource(), StringArgumentType.getString(context, "id"));
-		String name = StringArgumentType.getString(context, "displayName").trim();
+		String name = StationNames.normalize(StringArgumentType.getString(context, "displayName"));
 		if (station == null) {
 			return 0;
 		}
 		if (name.isEmpty()) {
 			return fail(context.getSource(), Failure.of(FailureCode.INVALID_NAME));
+		}
+		if (!railway.state().bindingsFor(station.id()).isEmpty()) {
+			return fail(context.getSource(), Failure.detail(FailureCode.STATION_NAME_LOCKED, station.displayName()));
+		}
+		boolean nameTaken = railway.state().stationsNamed(station.dimension(), name).stream()
+				.anyMatch(other -> !other.id().equals(station.id()));
+		if (nameTaken) {
+			return fail(context.getSource(), Failure.detail(FailureCode.STATION_NAME_TAKEN, name));
 		}
 		railway.state().updateStation(station.withDisplayName(name, railway.state().nextRevision()));
 		railway.saveState();
@@ -226,8 +242,8 @@ public final class RailCommand {
 		if (station == null) {
 			return 0;
 		}
-		if (!station.hasExit()) {
-			return fail(context.getSource(), Failure.detail(FailureCode.STATION_INCOMPLETE, station.id().value()));
+		if (station.isProvisional() || !station.hasExit()) {
+			return fail(context.getSource(), Failure.detail(FailureCode.STATION_INCOMPLETE, station.displayName()));
 		}
 		ServerLevel level = RailWorld.level(context.getSource().getServer(), station.dimension());
 		if (level == null) {
@@ -276,7 +292,10 @@ public final class RailCommand {
 		Messages.Lang lang = Messages.lang(source);
 		source.sendSuccess(() -> Messages.text(source, "station.info.id", station.id().value(), station.displayName()), false);
 		source.sendSuccess(() -> Messages.text(source, "station.info.dimension", station.dimension()), false);
-		source.sendSuccess(() -> Messages.text(source, "station.info.dock", station.dock().shortString()), false);
+		String dockText = station.isProvisional()
+				? Messages.format(lang, "station.dock.none")
+				: station.dock().shortString();
+		source.sendSuccess(() -> Messages.text(source, "station.info.dock", dockText), false);
 		source.sendSuccess(() -> station.hasExit()
 				? Messages.text(source, "station.info.exit", station.exit().shortString(), station.exitYaw())
 				: Messages.text(source, "station.info.exit_missing"), false);
@@ -312,7 +331,7 @@ public final class RailCommand {
 		source.sendSuccess(() -> Messages.text(source, "station.info.scan", scanText), false);
 
 		ServerLevel level = RailWorld.level(source.getServer(), station.dimension());
-		if (level != null) {
+		if (level != null && station.isAnchored()) {
 			RailWorld world = new RailWorld(level);
 			GraphRailView.Probe probe = world.graphProbe(station.dock());
 			Failure dockProblem = dockFailure(probe, station.dock());
@@ -342,8 +361,11 @@ public final class RailCommand {
 		Messages.Lang lang = Messages.lang(source);
 		for (Station station : stations) {
 			String state = Messages.format(lang, station.enabled() ? "state.enabled" : "state.disabled");
+			String dockText = station.isProvisional()
+					? Messages.format(lang, "station.dock.none")
+					: station.dock().shortString();
 			source.sendSuccess(() -> Messages.text(source, "station.list.entry", station.id().value(),
-					station.displayName(), station.dimension(), station.dock().shortString(), state), false);
+					station.displayName(), station.dimension(), dockText, state), false);
 		}
 		return 1;
 	}
@@ -378,6 +400,9 @@ public final class RailCommand {
 		Station to = station(context.getSource(), StringArgumentType.getString(context, "to"));
 		if (from == null || to == null) {
 			return 0;
+		}
+		if (from.isProvisional()) {
+			return fail(context.getSource(), Failure.detail(FailureCode.STATION_INCOMPLETE, from.displayName()));
 		}
 		if (!from.dimension().equals(to.dimension())) {
 			return fail(context.getSource(), Failure.of(FailureCode.DIMENSION_MISMATCH));
@@ -460,6 +485,9 @@ public final class RailCommand {
 		if (station == null) {
 			return 0;
 		}
+		if (station.isProvisional()) {
+			return fail(context.getSource(), Failure.detail(FailureCode.STATION_INCOMPLETE, station.displayName()));
+		}
 		ServerLevel level = RailWorld.level(context.getSource().getServer(), station.dimension());
 		if (level == null) {
 			return fail(context.getSource(), Failure.detail(FailureCode.WORLD_NOT_LOADED, station.dimension()));
@@ -538,6 +566,15 @@ public final class RailCommand {
 			return 0;
 		}
 		CommandSourceStack source = context.getSource();
+		if (from.isProvisional()) {
+			return fail(source, Failure.detail(FailureCode.STATION_INCOMPLETE, from.displayName()));
+		}
+		if (to.isProvisional()) {
+			return fail(source, Failure.detail(FailureCode.DESTINATION_NOT_ANCHORED, to.displayName()));
+		}
+		if (!to.hasExit()) {
+			return fail(source, Failure.detail(FailureCode.STATION_INCOMPLETE, to.displayName()));
+		}
 		RailGraph fromGraph = graphOrFail(source, railway, from);
 		if (fromGraph == null) {
 			return 0;

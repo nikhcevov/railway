@@ -28,7 +28,12 @@ public final class RouteResourcePlanner {
 
 	public static List<String> derive(RailGraph graph, GraphRoutePlan plan, Set<BlockLocation> dockPositions) {
 		String dimension = plan.dimension();
-		Set<BlockLocation> docks = new LinkedHashSet<>(dockPositions);
+		Set<BlockLocation> docks = new LinkedHashSet<>();
+		for (BlockLocation dock : dockPositions) {
+			if (dock != null) {
+				docks.add(dock);
+			}
+		}
 		docks.add(plan.fromDock());
 		docks.add(plan.toDock());
 		Set<String> resources = new LinkedHashSet<>();

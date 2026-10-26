@@ -288,13 +288,13 @@ public final class TurnoutGameTests implements CustomTestMethodInvoker {
 		BlockLocation button = absolute(helper, 0, y, 3);
 		level.setBlock(RailWorld.pos(button), Blocks.STONE_BUTTON.defaultBlockState(), 2);
 
-		Station home = new Station(new StationId("th" + unique), "Turnout Home", dimension,
+		Station home = new Station(new StationId("th" + unique), "Turnout Home " + unique, dimension,
 				absolute(helper, 0, y, 0), absolute(helper, 0, y, 2), 0.0F, true,
 				railway.state().nextRevision());
-		Station east = new Station(new StationId("te" + unique), "Turnout East", dimension,
+		Station east = new Station(new StationId("te" + unique), "Turnout East " + unique, dimension,
 				absolute(helper, 7, y, 0), absolute(helper, 7, y, 2), 0.0F, true,
 				railway.state().nextRevision());
-		Station south = new Station(new StationId("ts" + unique), "Turnout South", dimension,
+		Station south = new Station(new StationId("ts" + unique), "Turnout South " + unique, dimension,
 				absolute(helper, 3, y, 4), absolute(helper, 5, y, 4), 0.0F, true,
 				railway.state().nextRevision());
 		railway.state().addStation(home);
@@ -332,10 +332,10 @@ public final class TurnoutGameTests implements CustomTestMethodInvoker {
 		String dimension = RailWorld.dimension(level);
 		BlockLocation button = absolute(helper, 0, 1, 3);
 		level.setBlock(RailWorld.pos(button), Blocks.STONE_BUTTON.defaultBlockState(), 2);
-		Station home = new Station(new StationId("ch" + unique), "Curve Home", dimension,
+		Station home = new Station(new StationId("ch" + unique), "Curve Home " + unique, dimension,
 				absolute(helper, 0, 1, 0), absolute(helper, 0, 1, 2), 0.0F, true,
 				railway.state().nextRevision());
-		Station south = new Station(new StationId("cs" + unique), "Curve South", dimension,
+		Station south = new Station(new StationId("cs" + unique), "Curve South " + unique, dimension,
 				absolute(helper, 2, 2, 6), absolute(helper, 4, 2, 6), 0.0F, true,
 				railway.state().nextRevision());
 		railway.state().addStation(home);

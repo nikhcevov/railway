@@ -161,11 +161,20 @@ public final class TripService {
 		}
 		Station from = fromOpt.get();
 		Station to = toOpt.get();
+		if (from.isProvisional()) {
+			return reject(FailureCode.STATION_INCOMPLETE, from.displayName());
+		}
+		if (to.isProvisional()) {
+			return reject(FailureCode.DESTINATION_NOT_ANCHORED, to.displayName());
+		}
 		if (!from.enabled()) {
 			return reject(FailureCode.STATION_DISABLED, from.id().value());
 		}
 		if (!to.enabled()) {
 			return reject(FailureCode.STATION_DISABLED, to.id().value());
+		}
+		if (!to.hasExit()) {
+			return reject(FailureCode.STATION_INCOMPLETE, to.displayName());
 		}
 
 		ServerLevel level = RailWorld.level(server, from.dimension());
@@ -183,7 +192,11 @@ public final class TripService {
 		if (lastPress != null && tick - lastPress < config.playerCooldownTicks()) {
 			return reject(FailureCode.COOLDOWN, Integer.toString(config.playerCooldownTicks()));
 		}
-		if (!PlayerActions.withinRadius(player, from.dock(), config.boardingRadius())) {
+		if (railway.state().hasAnchorMarker(from.id())) {
+			if (!PlayerActions.withinSignRadius(player, from.dock())) {
+				return reject(FailureCode.PLAYER_TOO_FAR, "4");
+			}
+		} else if (!PlayerActions.withinRadius(player, from.dock(), config.boardingRadius())) {
 			return reject(FailureCode.PLAYER_TOO_FAR, Integer.toString(config.boardingRadius()));
 		}
 
@@ -232,7 +245,9 @@ public final class TripService {
 		TripId tripId = TripId.random();
 		java.util.Set<BlockLocation> docks = new java.util.HashSet<>();
 		for (Station station : railway.state().stations()) {
-			docks.add(station.dock());
+			if (station.isAnchored()) {
+				docks.add(station.dock());
+			}
 		}
 		List<String> resources = RouteResourcePlanner.derive(fromGraph, plan, docks);
 		String blocked = null;

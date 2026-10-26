@@ -2,6 +2,7 @@ package dev.nikhcevov.railway.persistence;
 
 import dev.nikhcevov.railway.domain.Binding;
 import dev.nikhcevov.railway.domain.BlockLocation;
+import dev.nikhcevov.railway.domain.SignMarker;
 import dev.nikhcevov.railway.domain.Station;
 import dev.nikhcevov.railway.domain.StationId;
 import dev.nikhcevov.railway.domain.TripId;
@@ -20,6 +21,7 @@ import java.util.UUID;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -52,6 +54,19 @@ class JsonStateStoreTest {
 			}
 			""";
 
+	private static final String PROVISIONAL_JSON = """
+			{
+			  "id": {"value": "mine"},
+			  "displayName": "Mine",
+			  "dimension": "minecraft:overworld",
+			  "dock": null,
+			  "exit": null,
+			  "exitYaw": 0.0,
+			  "enabled": false,
+			  "revision": 3
+			}
+			""";
+
 	private static final String BINDING_JSON = """
 			{
 			  "dimension": "minecraft:overworld",
@@ -77,6 +92,18 @@ class JsonStateStoreTest {
 	private static Station station(String id, long revision) {
 		return new Station(new StationId(id), "Station " + id, DIMENSION,
 				new BlockLocation(0, 64, 0), new BlockLocation(1, 64, 0), 90.0f, true, revision);
+	}
+
+	private static Station provisional(String id, long revision) {
+		return Station.provisional(new StationId(id), "Station " + id, DIMENSION, revision);
+	}
+
+	private static String markerJson(String dimension, int signX, int buttonX, String anchorId) {
+		String anchor = anchorId == null ? "null" : "{\"value\":\"" + anchorId + "\"}";
+		return """
+				{"dimension":"%s","sign":{"x":%d,"y":65,"z":0},"support":{"x":%d,"y":65,"z":1},\
+				"editedFront":true,"button":{"x":%d,"y":65,"z":2},"anchorStationId":%s}
+				""".formatted(dimension, signX, signX, buttonX, anchor).strip();
 	}
 
 	private static Binding binding(String from, String to, BlockLocation button) {
@@ -214,7 +241,7 @@ class JsonStateStoreTest {
 	void futureSchemaIsRejectedAndFileIsLeftUntouched() throws IOException {
 		Path file = stateFile();
 		writeState("""
-				{"schemaVersion": 2, "revision": 7, "stations": [], "bindings": [], "trips": []}
+				{"schemaVersion": 3, "revision": 7, "stations": [], "bindings": [], "trips": []}
 				""");
 		byte[] original = Files.readAllBytes(file);
 
@@ -251,7 +278,7 @@ class JsonStateStoreTest {
 		assertEquals(expected, store.file());
 		assertTrue(Files.isRegularFile(expected));
 		String json = Files.readString(expected, StandardCharsets.UTF_8);
-		assertTrue(json.contains("\"schemaVersion\": 1"), json);
+		assertTrue(json.contains("\"schemaVersion\": 2"), json);
 	}
 
 	@Test
@@ -288,5 +315,185 @@ class JsonStateStoreTest {
 		assertFalse(added);
 		assertEquals(revisionBefore, state.revision(), "a refused binding must not bump the revision");
 		assertEquals(List.of(first), state.bindings(), "the existing binding must not be replaced");
+	}
+
+	@Test
+	void versionOneStateIsBackedUpAndMigratedToVersionTwo() throws IOException, StateStore.StateException {
+		String original = """
+				{"schemaVersion": 1, "revision": 2, "stations": [%s, %s], "bindings": [%s], "trips": []}
+				""".formatted(ALPHA_JSON, BETA_JSON, BINDING_JSON);
+		writeState(original);
+		JsonStateStore store = new JsonStateStore(tempDir);
+
+		WorldState loaded = store.load();
+
+		assertEquals(2, loaded.stations().size());
+		assertEquals(List.of(binding("alpha", "beta", new BlockLocation(5, 64, 5))),
+				List.copyOf(loaded.bindings()));
+		assertTrue(loaded.signMarkers().isEmpty());
+		Path backup = tempDir.resolve("railway").resolve("state.v1.bak");
+		assertTrue(Files.isRegularFile(backup), "migrating v1 must keep the rolling backup");
+		assertEquals(original, Files.readString(backup, StandardCharsets.UTF_8));
+
+		store.save(loaded);
+		String saved = Files.readString(store.file(), StandardCharsets.UTF_8);
+		assertTrue(saved.contains("\"schemaVersion\": 2"), saved);
+		assertTrue(saved.contains("\"signMarkers\": []"), saved);
+		WorldState reloaded = new JsonStateStore(tempDir).load();
+		assertEquals(1, reloaded.bindings().size());
+		assertTrue(reloaded.signMarkers().isEmpty());
+	}
+
+	@Test
+	void versionOneDuplicateDisplayNamesAreRenamedInsteadOfDisablingState()
+			throws IOException, StateStore.StateException {
+		String duplicateBeta = BETA_JSON.replace("\"Beta\"", "\"Alpha\"");
+		writeState("""
+				{"schemaVersion": 1, "revision": 2, "stations": [%s, %s], "bindings": [%s], "trips": []}
+				""".formatted(ALPHA_JSON, duplicateBeta, BINDING_JSON));
+
+		JsonStateStore store = new JsonStateStore(tempDir);
+		WorldState loaded = store.load();
+
+		assertEquals(2, loaded.stations().size());
+		assertEquals("Alpha", loaded.station(new StationId("alpha")).orElseThrow().displayName());
+		assertEquals("Alpha (2)", loaded.station(new StationId("beta")).orElseThrow().displayName());
+		assertEquals(List.of(binding("alpha", "beta", new BlockLocation(5, 64, 5))),
+				List.copyOf(loaded.bindings()), "renaming a legacy duplicate must keep bindings");
+
+		store.save(loaded);
+		WorldState reloaded = new JsonStateStore(tempDir).load();
+		assertEquals("Alpha", reloaded.station(new StationId("alpha")).orElseThrow().displayName());
+		assertEquals("Alpha (2)", reloaded.station(new StationId("beta")).orElseThrow().displayName(),
+				"the migrated unique name must survive reload");
+	}
+
+	@Test
+	void provisionalStationRoundTripsWithoutDockOrExit() throws IOException, StateStore.StateException {
+		Station mine = provisional("mine", 3);
+		WorldState original = new WorldState();
+		original.addStation(mine);
+		original.addStation(station("alpha", 4));
+
+		JsonStateStore store = new JsonStateStore(tempDir);
+		store.save(original);
+		WorldState loaded = new JsonStateStore(tempDir).load();
+
+		Station loadedMine = loaded.station(mine.id()).orElseThrow();
+		assertEquals(mine, loadedMine);
+		assertTrue(loadedMine.isProvisional());
+		assertFalse(loadedMine.isAnchored());
+		assertNull(loadedMine.dock());
+		assertNull(loadedMine.exit());
+		assertFalse(loadedMine.enabled());
+	}
+
+	@Test
+	void signMarkersRoundTripAndRemainQueryableByButton() throws IOException, StateStore.StateException {
+		Station home = station("home", 1);
+		Station mine = provisional("mine", 2);
+		SignMarker homeUnit = new SignMarker(DIMENSION, new BlockLocation(3, 65, 0),
+				new BlockLocation(4, 65, 0), true, new BlockLocation(5, 65, 0), home.id());
+		SignMarker anchorOnly = new SignMarker(DIMENSION, new BlockLocation(10, 70, 0),
+				new BlockLocation(11, 70, 0), false, null, home.id());
+		SignMarker destinationUnit = new SignMarker(DIMENSION, new BlockLocation(20, 66, 5),
+				new BlockLocation(21, 66, 5), true, new BlockLocation(22, 66, 5), null);
+		WorldState original = new WorldState();
+		original.addStation(home);
+		original.addStation(mine);
+		assertTrue(original.addSignMarker(homeUnit));
+		assertTrue(original.addSignMarker(anchorOnly));
+		assertTrue(original.addSignMarker(destinationUnit));
+
+		JsonStateStore store = new JsonStateStore(tempDir);
+		store.save(original);
+		WorldState loaded = new JsonStateStore(tempDir).load();
+
+		assertEquals(List.of(homeUnit, anchorOnly, destinationUnit), List.copyOf(loaded.signMarkers()));
+		assertEquals(anchorOnly, loaded.signMarker(DIMENSION, new BlockLocation(10, 70, 0)).orElseThrow());
+		assertEquals(homeUnit,
+				loaded.signMarkerForButton(DIMENSION, new BlockLocation(5, 65, 0)).orElseThrow());
+		assertEquals(destinationUnit,
+				loaded.signMarkerForButton(DIMENSION, new BlockLocation(22, 66, 5)).orElseThrow());
+	}
+
+	@Test
+	void versionTwoWithoutSignMarkerListLoads() throws IOException, StateStore.StateException {
+		writeState("""
+				{"schemaVersion": 2, "revision": 2, "stations": [%s, %s], "bindings": [%s], "trips": []}
+				""".formatted(ALPHA_JSON, BETA_JSON, BINDING_JSON));
+
+		WorldState loaded = new JsonStateStore(tempDir).load();
+
+		assertTrue(loaded.signMarkers().isEmpty());
+		assertEquals(1, loaded.bindings().size());
+	}
+
+	@Test
+	void enabledOrExitBearingProvisionalStationsAreRejected() throws IOException {
+		String enabled = """
+				{"id":{"value":"mine"},"displayName":"Mine","dimension":"minecraft:overworld",\
+				"dock":null,"exit":null,"exitYaw":0.0,"enabled":true,"revision":1}
+				""".strip();
+		writeState("""
+				{"schemaVersion": 2, "revision": 1, "stations": [%s], "bindings": [], "signMarkers": [], "trips": []}
+				""".formatted(enabled));
+		StateStore.StateException enabledError = assertThrows(StateStore.StateException.class,
+				() -> new JsonStateStore(tempDir).load());
+		assertTrue(enabledError.getMessage().contains("provisional"), enabledError::getMessage);
+
+		String withExit = """
+				{"id":{"value":"mine"},"displayName":"Mine","dimension":"minecraft:overworld",\
+				"dock":null,"exit":{"x":1,"y":64,"z":1},"exitYaw":0.0,"enabled":false,"revision":1}
+				""".strip();
+		writeState("""
+				{"schemaVersion": 2, "revision": 1, "stations": [%s], "bindings": [], "signMarkers": [], "trips": []}
+				""".formatted(withExit));
+		StateStore.StateException exitError = assertThrows(StateStore.StateException.class,
+				() -> new JsonStateStore(tempDir).load());
+		assertTrue(exitError.getMessage().contains("provisional"), exitError::getMessage);
+	}
+
+	@Test
+	void duplicateSignOrButtonMarkerKeysAreRejected() throws IOException {
+		String duplicateSign = markerJson(DIMENSION, 3, 8, "alpha");
+		String sameSignOtherButton = markerJson(DIMENSION, 3, 9, "alpha");
+		writeState("""
+				{"schemaVersion": 2, "revision": 3, "stations": [%s, %s], "bindings": [],
+				 "signMarkers": [%s, %s], "trips": []}
+				""".formatted(ALPHA_JSON, BETA_JSON, duplicateSign, sameSignOtherButton));
+		StateStore.StateException signError = assertThrows(StateStore.StateException.class,
+				() -> new JsonStateStore(tempDir).load());
+		assertTrue(signError.getMessage().contains("duplicate sign marker"), signError::getMessage);
+
+		String firstButton = markerJson(DIMENSION, 4, 12, "alpha");
+		String secondButton = markerJson(DIMENSION, 6, 12, "alpha");
+		writeState("""
+				{"schemaVersion": 2, "revision": 3, "stations": [%s, %s], "bindings": [],
+				 "signMarkers": [%s, %s], "trips": []}
+				""".formatted(ALPHA_JSON, BETA_JSON, firstButton, secondButton));
+		StateStore.StateException buttonError = assertThrows(StateStore.StateException.class,
+				() -> new JsonStateStore(tempDir).load());
+		assertTrue(buttonError.getMessage().contains("duplicate sign marker button"), buttonError::getMessage);
+	}
+
+	@Test
+	void unknownOrCrossDimensionMarkerStationsAreRejected() throws IOException {
+		writeState("""
+				{"schemaVersion": 2, "revision": 3, "stations": [%s, %s], "bindings": [],
+				 "signMarkers": [%s], "trips": []}
+				""".formatted(ALPHA_JSON, BETA_JSON, markerJson(DIMENSION, 40, 41, "ghost")));
+		StateStore.StateException unknown = assertThrows(StateStore.StateException.class,
+				() -> new JsonStateStore(tempDir).load());
+		assertTrue(unknown.getMessage().contains("unknown station"), unknown::getMessage);
+
+		writeState("""
+				{"schemaVersion": 2, "revision": 3, "stations": [%s, %s], "bindings": [],
+				 "signMarkers": [%s], "trips": []}
+				""".formatted(ALPHA_JSON, BETA_JSON,
+				markerJson("minecraft:the_nether", 50, 51, "alpha")));
+		StateStore.StateException dimension = assertThrows(StateStore.StateException.class,
+				() -> new JsonStateStore(tempDir).load());
+		assertTrue(dimension.getMessage().contains("dimension"), dimension::getMessage);
 	}
 }

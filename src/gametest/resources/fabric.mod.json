@@ -9,7 +9,8 @@
 			"dev.nikhcevov.railway.gametest.RailwayGameTests",
 			"dev.nikhcevov.railway.gametest.TurnoutGameTests",
 			"dev.nikhcevov.railway.gametest.SpeedGameTests",
-			"dev.nikhcevov.railway.gametest.ParallelGameTests"
+			"dev.nikhcevov.railway.gametest.ParallelGameTests",
+			"dev.nikhcevov.railway.gametest.SignGameTests"
 		]
 	},
 	"depends": {

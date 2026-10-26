@@ -28,6 +28,7 @@ public final class Railway {
 	private StateStore store;
 	private ScanService scans;
 	private TripService trips;
+	private SignRegistrationService signs;
 	private boolean disabled;
 	private String disabledReason;
 	private boolean stateLoaded;
@@ -91,6 +92,7 @@ public final class Railway {
 
 		scans = new ScanService(LOGGER);
 		trips = new TripService(this, LOGGER);
+		signs = new SignRegistrationService(this, LOGGER);
 		store = new JsonStateStore(server.getWorldPath(LevelResource.ROOT));
 		try {
 			state = store.load();
@@ -144,6 +146,10 @@ public final class Railway {
 
 	public TripService trips() {
 		return trips;
+	}
+
+	public SignRegistrationService signs() {
+		return signs;
 	}
 
 	public boolean disabled() {

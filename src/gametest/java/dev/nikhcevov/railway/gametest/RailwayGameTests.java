@@ -200,9 +200,9 @@ public final class RailwayGameTests implements CustomTestMethodInvoker {
 		BlockLocation mineExit = absolute(helper, MINE_DOCK, 1, 2);
 		String dimension = RailWorld.dimension(level);
 
-		Station home = new Station(homeId, "Game Test Home", dimension, homeDock, homeExit, 0.0F, true,
+		Station home = new Station(homeId, "Game Test Home " + unique, dimension, homeDock, homeExit, 0.0F, true,
 				railway.state().nextRevision());
-		Station mine = new Station(mineId, "Game Test Mine", dimension, mineDock, mineExit, 0.0F, true,
+		Station mine = new Station(mineId, "Game Test Mine " + unique, dimension, mineDock, mineExit, 0.0F, true,
 				railway.state().nextRevision());
 		railway.state().addStation(home);
 		railway.state().addStation(mine);

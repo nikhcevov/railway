@@ -39,6 +39,18 @@ public final class PlayerActions {
 		return dx * dx + dy * dy + dz * dz <= radius * radius;
 	}
 
+	/**
+	 * Boarding envelope for sign-created stations: horizontal 4 blocks and vertical 3
+	 * blocks from the dock. It deliberately keeps the full vertical tolerance so a
+	 * button at {@code dockY + 3} is reachable.
+	 */
+	public static boolean withinSignRadius(ServerPlayer player, BlockLocation dock) {
+		double dx = player.getX() - (dock.x() + 0.5);
+		double dz = player.getZ() - (dock.z() + 0.5);
+		double dy = player.getY() - (dock.y() + 0.5);
+		return dx * dx + dz * dz <= 4.0 * 4.0 && Math.abs(dy) <= 3.0;
+	}
+
 	public static Minecart spawnServiceCart(ServerLevel level, BlockLocation dock, TripId tripId) {
 		Minecart cart = EntityType.MINECART.create(level, EntitySpawnReason.COMMAND);
 		if (cart == null) {

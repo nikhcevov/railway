@@ -66,6 +66,10 @@ public final class ScanService {
 	}
 
 	public StartResult start(Station station, ServerLevel level, Config config, long tick, long revision) {
+		if (station.isProvisional()) {
+			return new StartResult.Rejected(
+					Failure.detail(FailureCode.STATION_INCOMPLETE, station.displayName()));
+		}
 		Job existing = jobs.get(station.id());
 		if (existing != null && !existing.scanner.isFinished()) {
 			return new StartResult.Rejected(Failure.detail(FailureCode.SCAN_RUNNING, station.id().value()));
