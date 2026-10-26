@@ -1,0 +1,23 @@
+{
+	"schemaVersion": 1,
+	"id": "railway",
+	"version": "${version}",
+	"name": "Railway",
+	"description": "Server-side automated passenger minecart travel over player-built vanilla rails.",
+	"authors": [
+		"nikhcevov"
+	],
+	"license": "MIT",
+	"environment": "server",
+	"entrypoints": {
+		"main": [
+			"dev.nikhcevov.railway.RailwayMod"
+		]
+	},
+	"depends": {
+		"fabricloader": ">=0.20.1",
+		"minecraft": "~26.1.2",
+		"java": ">=25",
+		"fabric-api": "*"
+	}
+}
