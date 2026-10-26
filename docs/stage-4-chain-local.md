@@ -107,7 +107,8 @@ line 4: optional flags: "m"
   - Save schema 3; keep rolling backup behavior.
 - Re-saving an old registered sign updates its binding `sourceDock` to the resolved
   local dock if from/to/button are unchanged. Do not reject just because the old
-  sourceDock was null.
+  sourceDock was null. A source-dock fill also refreshes the connected station scans
+  so the upgraded sign can be used without a separate manual scan.
 
 ## Lifecycle
 

@@ -295,6 +295,8 @@ public final class SignRegistrationService {
 		Station stationFrom;
 		Station stationTo = null;
 		boolean mainMoved = false;
+		boolean bindingAddedOrChanged = binding != null
+				&& (existingBinding == null || !existingBinding.equals(binding));
 		try {
 			if (anchorMode) {
 				if (from == null) {
@@ -353,9 +355,9 @@ public final class SignRegistrationService {
 							stationFrom.displayName(), rejected.failure().code(), rejected.failure().detail());
 				}
 				refreshConnectedScans(stationFrom, stationFrom.id());
-			} else if (mainMoved || (binding != null && existingBinding == null)) {
-				// A new route or a moved main needs both endpoints at the current
-				// revision. A main move plus a new binding still refreshes once.
+			} else if (mainMoved || bindingAddedOrChanged) {
+				// A new route, a moved main, or a legacy sign gaining its local source
+				// dock needs connected station graphs at the current revision.
 				refreshConnectedScans(stationFrom, null);
 			}
 
