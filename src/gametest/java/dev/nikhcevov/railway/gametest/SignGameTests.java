@@ -50,7 +50,8 @@ public final class SignGameTests implements CustomTestMethodInvoker {
 	private static final int HOME_X = 1;
 	private static final int MINE_X = 6;
 	private static final int DEST_SIGN_X = 3;
-	private static final int DEST_SUPPORT_X = 4;
+	private static final int DEST_SUPPORT_X = 3;
+	private static final int DEST_SUPPORT_Z = 2;
 	private static final int Z_RAIL = 0;
 	private static final int Z_SIGN = 1;
 	private static final int Z_PILLAR = 2;
@@ -104,7 +105,7 @@ public final class SignGameTests implements CustomTestMethodInvoker {
 		});
 	}
 
-	@GameTest(maxTicks = 300)
+	@GameTest(maxTicks = 600)
 	public void mineSignAnchorsProvisionalAndBothRoutesStart(GameTestHelper helper) {
 		Fixture fixture = buildFixture(helper);
 		BlockLocation homeSign = placeWallSign(helper, HOME_X, 3, Z_SIGN, Direction.NORTH);
@@ -151,15 +152,16 @@ public final class SignGameTests implements CustomTestMethodInvoker {
 				helper.succeed();
 				return;
 			}
-			if (fixture.railway().trips().activeCount() >= fixture.railway().config().maxActiveTrips()) {
+			if (fixture.railway().trips().activeCount()
+					>= fixture.railway().config().maxActiveTrips() - 1) {
 				return;
 			}
-			if (route[0] == 0) {
-				requireRouteStarts(helper, fixture, fixture.homeExit(), homeToMine);
-			} else {
-				requireRouteStarts(helper, fixture, fixture.mineExit(), mineToHome);
+			boolean started = route[0] == 0
+					? requireRouteStarts(helper, fixture, fixture.homeExit(), homeToMine)
+					: requireRouteStarts(helper, fixture, fixture.mineExit(), mineToHome);
+			if (started) {
+				route[0]++;
 			}
-			route[0]++;
 		});
 	}
 
@@ -221,10 +223,10 @@ public final class SignGameTests implements CustomTestMethodInvoker {
 		check(helper, state(fixture).bindingsFor(home.id()).isEmpty(), "station-only anchor created a binding");
 
 		for (int y = 0; y <= PILLAR_TOP; y++) {
-			helper.setBlock(new BlockPos(DEST_SUPPORT_X, y, Z_SIGN), Blocks.STONE);
+			helper.setBlock(new BlockPos(DEST_SUPPORT_X, y, DEST_SUPPORT_Z), Blocks.STONE);
 		}
-		BlockLocation sign = placeWallSign(helper, DEST_SIGN_X, 3, Z_SIGN, Direction.WEST);
-		BlockLocation button = placeWallButton(helper, DEST_SUPPORT_X, 2, Z_PILLAR, Direction.SOUTH);
+		BlockLocation sign = placeWallSign(helper, DEST_SIGN_X, 3, Z_SIGN, Direction.NORTH);
+		BlockLocation button = placeWallButton(helper, DEST_SIGN_X, 2, Z_SIGN, Direction.NORTH);
 		clearRegistration(fixture, sign, button);
 
 		saveSign(fixture, sign, fixture.player(), fixture.homeName(), fixture.mineName());
@@ -243,13 +245,16 @@ public final class SignGameTests implements CustomTestMethodInvoker {
 		check(helper, marker != null, "destination marker missing");
 		check(helper, !marker.isAnchor(), "destination unit must not anchor a station");
 		check(helper, button.equals(marker.button()), "destination marker button mismatch");
-		BlockLocation support = RailWorld.loc(helper.absolutePos(new BlockPos(DEST_SUPPORT_X, 3, Z_SIGN)));
+		BlockLocation support = RailWorld.loc(helper.absolutePos(
+				new BlockPos(DEST_SUPPORT_X, 3, DEST_SUPPORT_Z)));
 		check(helper, support.equals(marker.support()), "destination support mismatch: " + marker.support());
 
 		Binding binding = state(fixture).binding(fixture.dimension(), button).orElse(null);
 		check(helper, binding != null, "destination binding missing");
 		check(helper, binding.fromStationId().equals(home.id()), "destination binding source mismatch");
 		check(helper, binding.toStationId().equals(mine.id()), "destination binding target mismatch");
+		check(helper, binding.sourceDock().equals(fixture.homeDock().offset(2, 0, 0)),
+				"destination source dock mismatch: " + binding.sourceDock());
 		helper.succeed();
 	}
 
@@ -385,7 +390,7 @@ public final class SignGameTests implements CustomTestMethodInvoker {
 		helper.succeed();
 	}
 
-	@GameTest(maxTicks = 400)
+	@GameTest(maxTicks = 600)
 	public void newDestinationBindingRefreshesAnchoredScans(GameTestHelper helper) {
 		Fixture fixture = buildFixture(helper);
 
@@ -403,10 +408,10 @@ public final class SignGameTests implements CustomTestMethodInvoker {
 		finishScan(fixture, helper, mine);
 
 		for (int y = 0; y <= PILLAR_TOP; y++) {
-			helper.setBlock(new BlockPos(DEST_SUPPORT_X, y, Z_SIGN), Blocks.STONE);
+			helper.setBlock(new BlockPos(DEST_SUPPORT_X, y, DEST_SUPPORT_Z), Blocks.STONE);
 		}
-		BlockLocation sign = placeWallSign(helper, DEST_SIGN_X, 3, Z_SIGN, Direction.WEST);
-		BlockLocation button = placeWallButton(helper, DEST_SUPPORT_X, 2, Z_PILLAR, Direction.SOUTH);
+		BlockLocation sign = placeWallSign(helper, DEST_SIGN_X, 3, Z_SIGN, Direction.NORTH);
+		BlockLocation button = placeWallButton(helper, DEST_SIGN_X, 2, Z_SIGN, Direction.NORTH);
 		clearRegistration(fixture, sign, button);
 		saveSign(fixture, sign, fixture.player(), fixture.homeName(), fixture.mineName());
 
@@ -429,11 +434,383 @@ public final class SignGameTests implements CustomTestMethodInvoker {
 				helper.succeed();
 				return;
 			}
-			if (fixture.railway().trips().activeCount() >= fixture.railway().config().maxActiveTrips()) {
+			if (fixture.railway().trips().activeCount()
+					>= fixture.railway().config().maxActiveTrips() - 1) {
 				return;
 			}
-			requireRouteStarts(helper, fixture, fixture.homeExit(), binding);
-			started[0]++;
+			if (requireRouteStarts(helper, fixture, fixture.homeExit(), binding)) {
+				started[0]++;
+			}
+		});
+	}
+
+	@GameTest(maxTicks = 600)
+	public void chainedFarUnitDepartsFromItsLocalDock(GameTestHelper helper) {
+		Fixture fixture = buildFixture(helper);
+		BlockLocation homeSign = placeWallSign(helper, HOME_X, 3, Z_SIGN, Direction.NORTH);
+		clearRegistration(fixture, homeSign, absolute(helper, HOME_X, 2, Z_SIGN));
+		saveSign(fixture, homeSign, fixture.player(), fixture.homeName(), "");
+		Station home = station(helper, fixture, fixture.homeName());
+		check(helper, home.isAnchored() && home.enabled(), "Home was not anchored");
+
+		buildPillar(helper, 0, DEST_SUPPORT_Z);
+		buildExitPlatform(helper, 0, Z_EXIT);
+		BlockLocation edgeSign = placeWallSign(helper, 0, 3, Z_SIGN, Direction.NORTH);
+		clearRegistration(fixture, edgeSign, absolute(helper, 0, 2, Z_SIGN));
+		saveSign(fixture, edgeSign, fixture.player(), fixture.edgeName(), "");
+		Station edge = station(helper, fixture, fixture.edgeName());
+		check(helper, edge.isAnchored() && edge.enabled(), "Edge was not anchored");
+
+		// The x=3 unit is 2 blocks from the anchor, the x=7 unit is 4 blocks from
+		// it and 6 blocks from the main dock.
+		buildPillar(helper, DEST_SIGN_X, DEST_SUPPORT_Z);
+		BlockLocation midSign = placeWallSign(helper, DEST_SIGN_X, 3, Z_SIGN, Direction.NORTH);
+		BlockLocation midButton = placeWallButton(helper, DEST_SIGN_X, 2, Z_SIGN, Direction.NORTH);
+		clearRegistration(fixture, midSign, midButton);
+		saveSign(fixture, midSign, fixture.player(), fixture.homeName(), edge.displayName());
+
+		buildPillar(helper, 7, DEST_SUPPORT_Z);
+		buildExitPlatform(helper, 7, Z_EXIT);
+		BlockLocation farSign = placeWallSign(helper, 7, 3, Z_SIGN, Direction.NORTH);
+		BlockLocation farButton = placeWallButton(helper, 7, 2, Z_SIGN, Direction.NORTH);
+		clearRegistration(fixture, farSign, farButton);
+		saveSign(fixture, farSign, fixture.player(), fixture.homeName(), edge.displayName());
+
+		Binding far = state(fixture).binding(fixture.dimension(), farButton).orElse(null);
+		check(helper, far != null, "far chained binding missing");
+		BlockLocation farDock = absolute(helper, 7, DOCK_Y, Z_RAIL);
+		check(helper, farDock.equals(far.sourceDock()), "far source dock mismatch: " + far.sourceDock());
+		check(helper, Math.abs(farDock.x() - home.dock().x()) > 4,
+				"fixture error: far pillar must be beyond the 4-block main reach");
+
+		finishScan(fixture, helper, home);
+		finishScan(fixture, helper, edge);
+		int[] started = {0};
+		helper.onEachTick(() -> {
+			if (started[0] > 0) {
+				helper.succeed();
+				return;
+			}
+			if (fixture.railway().trips().activeCount()
+					>= fixture.railway().config().maxActiveTrips() - 1) {
+				return;
+			}
+			if (requireRouteStarts(helper, fixture, absolute(helper, 7, DOCK_Y, Z_EXIT), far)) {
+				started[0]++;
+			}
+		});
+	}
+
+	@GameTest(maxTicks = 200)
+	public void nonChainedFarUnitIsRejected(GameTestHelper helper) {
+		Fixture fixture = buildFixture(helper);
+		BlockLocation homeSign = placeWallSign(helper, HOME_X, 3, Z_SIGN, Direction.NORTH);
+		clearRegistration(fixture, homeSign, absolute(helper, HOME_X, 2, Z_SIGN));
+		saveSign(fixture, homeSign, fixture.player(), fixture.homeName(), "");
+		station(helper, fixture, fixture.homeName());
+
+		buildPillar(helper, 7, DEST_SUPPORT_Z);
+		BlockLocation farSign = placeWallSign(helper, 7, 3, Z_SIGN, Direction.NORTH);
+		BlockLocation farButton = placeWallButton(helper, 7, 2, Z_SIGN, Direction.NORTH);
+		clearRegistration(fixture, farSign, farButton);
+		saveSign(fixture, farSign, fixture.player(), fixture.homeName(), fixture.mineName());
+
+		SignBlockEntity entity = signEntity(fixture, farSign);
+		SignRegistrationService.Result result = fixture.railway().signs()
+				.register(fixture.player(), entity, true, entity.getText(true));
+		check(helper, result instanceof SignRegistrationService.Result.Rejected,
+				"non-chained far unit should be rejected, got " + result);
+		FailureCode code = ((SignRegistrationService.Result.Rejected) result).failure().code();
+		check(helper, code == FailureCode.SIGN_CHAIN, "expected SIGN_CHAIN, got " + code);
+		check(helper, state(fixture).signMarker(fixture.dimension(), farSign).isEmpty(),
+				"rejected far unit created a marker");
+		check(helper, state(fixture).binding(fixture.dimension(), farButton).isEmpty(),
+				"rejected far unit created a binding");
+		helper.succeed();
+	}
+
+	@GameTest(maxTicks = 600)
+	public void mainFlagMovesStationArrival(GameTestHelper helper) {
+		Fixture fixture = buildFixture(helper);
+		BlockLocation homeSign = placeWallSign(helper, HOME_X, 3, Z_SIGN, Direction.NORTH);
+		clearRegistration(fixture, homeSign, absolute(helper, HOME_X, 2, Z_SIGN));
+		saveSign(fixture, homeSign, fixture.player(), fixture.homeName(), "");
+		Station home = station(helper, fixture, fixture.homeName());
+
+		buildPillar(helper, DEST_SIGN_X, DEST_SUPPORT_Z);
+		buildExitPlatform(helper, DEST_SIGN_X, Z_EXIT);
+		ServerPlayer mover = opPlayer(helper, fixture, absolute(helper, DEST_SIGN_X, DOCK_Y, Z_EXIT));
+		BlockLocation mainSign = placeWallSign(helper, DEST_SIGN_X, 3, Z_SIGN, Direction.NORTH);
+		BlockLocation mainButton = placeWallButton(helper, DEST_SIGN_X, 2, Z_SIGN, Direction.NORTH);
+		clearRegistration(fixture, mainSign, mainButton);
+		saveSignWithFlags(fixture, mainSign, mover, fixture.homeName(), fixture.mineName(), "m");
+
+		Station moved = station(helper, fixture, fixture.homeName());
+		BlockLocation movedDock = absolute(helper, DEST_SIGN_X, DOCK_Y, Z_RAIL);
+		BlockLocation movedExit = absolute(helper, DEST_SIGN_X, DOCK_Y, Z_EXIT);
+		check(helper, moved.id().equals(home.id()), "main move changed the station identity");
+		check(helper, movedDock.equals(moved.dock()), "main dock did not move: " + moved.dock());
+		check(helper, movedExit.equals(moved.exit()), "main exit did not move: " + moved.exit());
+		SignMarker mainMarker = state(fixture).mainMarkerForStation(home.id()).orElse(null);
+		check(helper, mainMarker != null && mainMarker.sign().equals(mainSign),
+				"main marker not recorded on the m sign");
+		Binding mainBinding = state(fixture).binding(fixture.dimension(), mainButton).orElse(null);
+		check(helper, mainBinding != null && movedDock.equals(mainBinding.sourceDock()),
+				"m unit local source dock mismatch");
+
+		ServerPlayer mineBuilder = opPlayer(helper, fixture, absolute(helper, MINE_X, DOCK_Y, Z_EXIT));
+		BlockLocation mineSign = placeWallSign(helper, MINE_X, 3, Z_SIGN, Direction.NORTH);
+		BlockLocation mineButton = placeWallButton(helper, MINE_X, 2, Z_SIGN, Direction.NORTH);
+		clearRegistration(fixture, mineSign, mineButton);
+		saveSign(fixture, mineSign, mineBuilder, fixture.mineName(), fixture.homeName());
+		Station mine = station(helper, fixture, fixture.mineName());
+		Binding mineToHome = state(fixture).binding(fixture.dimension(), mineButton).orElse(null);
+		check(helper, mineToHome != null, "Mine -> Home binding missing");
+
+		finishScan(fixture, helper, moved);
+		finishScan(fixture, helper, mine);
+		ServerPlayer traveller = opPlayer(helper, fixture, mine.exit());
+		TripId[] tripId = {null};
+		helper.onEachTick(() -> {
+			if (tripId[0] == null) {
+				if (fixture.railway().trips().activeCount()
+						>= fixture.railway().config().maxActiveTrips() - 1) {
+					return;
+				}
+				TripService.StartResult start = fixture.railway().trips().start(traveller, mineToHome);
+				if (start instanceof TripService.StartResult.Rejected rejected) {
+					if (rejected.failure().code() == FailureCode.TRIP_LIMIT) {
+						return;
+					}
+					throw helper.assertionException("trip to the moved main was rejected: "
+							+ rejected.failure().code() + " " + rejected.failure().detail());
+				}
+				tripId[0] = ((TripService.StartResult.Started) start).id();
+				return;
+			}
+			for (var active : fixture.railway().trips().activeTrips()) {
+				if (active.id().equals(tripId[0])) {
+					return;
+				}
+			}
+			if (!traveller.blockPosition().equals(RailWorld.pos(moved.exit()))) {
+				throw helper.assertionException("passenger at " + traveller.blockPosition()
+						+ ", expected moved main exit " + moved.exit().shortString());
+			}
+			helper.succeed();
+		});
+	}
+
+	@GameTest(maxTicks = 400)
+	public void secondMainFlagRequiresClearingTheFirst(GameTestHelper helper) {
+		Fixture fixture = buildFixture(helper);
+		BlockLocation homeSign = placeWallSign(helper, HOME_X, 3, Z_SIGN, Direction.NORTH);
+		clearRegistration(fixture, homeSign, absolute(helper, HOME_X, 2, Z_SIGN));
+		saveSign(fixture, homeSign, fixture.player(), fixture.homeName(), "");
+		Station home = station(helper, fixture, fixture.homeName());
+
+		buildPillar(helper, DEST_SIGN_X, DEST_SUPPORT_Z);
+		BlockLocation firstSign = placeWallSign(helper, DEST_SIGN_X, 3, Z_SIGN, Direction.NORTH);
+		BlockLocation firstButton = placeWallButton(helper, DEST_SIGN_X, 2, Z_SIGN, Direction.NORTH);
+		clearRegistration(fixture, firstSign, firstButton);
+		saveSignWithFlags(fixture, firstSign, fixture.player(), fixture.homeName(), fixture.mineName(), "m");
+		BlockLocation firstDock = absolute(helper, DEST_SIGN_X, DOCK_Y, Z_RAIL);
+		Station afterFirst = station(helper, fixture, fixture.homeName());
+		check(helper, firstDock.equals(afterFirst.dock()), "first m did not move main");
+
+		buildPillar(helper, 5, DEST_SUPPORT_Z);
+		buildExitPlatform(helper, 5, Z_EXIT);
+		BlockLocation secondSign = placeWallSign(helper, 5, 3, Z_SIGN, Direction.NORTH);
+		BlockLocation secondButton = placeWallButton(helper, 5, 2, Z_SIGN, Direction.NORTH);
+		clearRegistration(fixture, secondSign, secondButton);
+		saveSignWithFlags(fixture, secondSign, fixture.player(), fixture.homeName(), fixture.mineName(), "m");
+
+		SignBlockEntity secondEntity = signEntity(fixture, secondSign);
+		SignRegistrationService.Result conflict = fixture.railway().signs()
+				.register(fixture.player(), secondEntity, true, secondEntity.getText(true));
+		check(helper, conflict instanceof SignRegistrationService.Result.Rejected,
+				"a second m should be rejected, got " + conflict);
+		FailureCode conflictCode = ((SignRegistrationService.Result.Rejected) conflict).failure().code();
+		check(helper, conflictCode == FailureCode.SIGN_MAIN_CONFLICT,
+				"expected SIGN_MAIN_CONFLICT, got " + conflictCode);
+		check(helper, state(fixture).signMarker(fixture.dimension(), secondSign).isEmpty(),
+				"rejected second m created a marker");
+		check(helper, firstSign.equals(state(fixture).mainMarkerForStation(home.id())
+				.orElseThrow().sign()), "rejected second m changed the main marker");
+		check(helper, firstDock.equals(state(fixture).station(home.id()).orElseThrow().dock()),
+				"rejected second m moved the station main");
+
+		saveSignWithFlags(fixture, firstSign, fixture.player(), fixture.homeName(), fixture.mineName(), "");
+		check(helper, state(fixture).mainMarkerForStation(home.id()).isEmpty(),
+				"clearing m did not clear the main flag");
+		check(helper, firstDock.equals(state(fixture).station(home.id()).orElseThrow().dock()),
+				"clearing m reverted the sticky main dock");
+
+		saveSignWithFlags(fixture, secondSign, fixture.player(), fixture.homeName(), fixture.mineName(), "m");
+		Station afterSecond = station(helper, fixture, fixture.homeName());
+		BlockLocation secondDock = absolute(helper, 5, DOCK_Y, Z_RAIL);
+		check(helper, secondDock.equals(afterSecond.dock()), "second m did not move main: " + afterSecond.dock());
+		SignMarker newMain = state(fixture).mainMarkerForStation(home.id()).orElse(null);
+		check(helper, newMain != null && newMain.sign().equals(secondSign),
+				"second m did not become the main marker");
+		helper.succeed();
+	}
+
+	@GameTest(maxTicks = 200)
+	public void breakingMainSignKeepsStationAndOtherUnits(GameTestHelper helper) {
+		Fixture fixture = buildFixture(helper);
+		BlockLocation homeSign = placeWallSign(helper, HOME_X, 3, Z_SIGN, Direction.NORTH);
+		clearRegistration(fixture, homeSign, absolute(helper, HOME_X, 2, Z_SIGN));
+		saveSign(fixture, homeSign, fixture.player(), fixture.homeName(), "");
+		Station home = station(helper, fixture, fixture.homeName());
+
+		buildPillar(helper, DEST_SIGN_X, DEST_SUPPORT_Z);
+		BlockLocation mainSign = placeWallSign(helper, DEST_SIGN_X, 3, Z_SIGN, Direction.NORTH);
+		BlockLocation mainButton = placeWallButton(helper, DEST_SIGN_X, 2, Z_SIGN, Direction.NORTH);
+		clearRegistration(fixture, mainSign, mainButton);
+		saveSignWithFlags(fixture, mainSign, fixture.player(), fixture.homeName(), fixture.mineName(), "m");
+		BlockLocation mainDock = absolute(helper, DEST_SIGN_X, DOCK_Y, Z_RAIL);
+		BlockLocation mainExit = state(fixture).station(home.id()).orElseThrow().exit();
+		check(helper, mainDock.equals(state(fixture).station(home.id()).orElseThrow().dock()),
+				"m did not move main before the break");
+
+		breakBlockThroughService(fixture, mainSign);
+
+		Station afterMainBreak = state(fixture).station(home.id()).orElse(null);
+		check(helper, afterMainBreak != null, "station disappeared with the main sign");
+		check(helper, afterMainBreak.enabled(), "station was disabled by breaking a non-anchor main sign");
+		check(helper, mainDock.equals(afterMainBreak.dock()), "station main dock was lost");
+		check(helper, mainExit.equals(afterMainBreak.exit()), "station main exit was lost");
+		check(helper, state(fixture).mainMarkerForStation(home.id()).isEmpty(),
+				"main flag survived the sign break");
+		check(helper, state(fixture).signMarker(fixture.dimension(), homeSign).isPresent(),
+				"anchor unit was removed with the main sign");
+		check(helper, state(fixture).signUnitCount(home.id()) == 1, "unexpected unit count after main break");
+
+		breakBlockThroughService(fixture, homeSign);
+
+		Station afterAnchorBreak = state(fixture).station(home.id()).orElse(null);
+		check(helper, afterAnchorBreak != null, "station was removed with its last sign");
+		check(helper, !afterAnchorBreak.enabled(), "station was not disabled with its last unit");
+		check(helper, mainDock.equals(afterAnchorBreak.dock()), "station main dock was lost with the last unit");
+		check(helper, mainExit.equals(afterAnchorBreak.exit()), "station main exit was lost with the last unit");
+		check(helper, state(fixture).signUnitCount(home.id()) == 0, "last unit left a marker");
+		helper.succeed();
+	}
+
+	@GameTest(maxTicks = 400)
+	public void centralMainOnlyUnitMovesArrivalAndClears(GameTestHelper helper) {
+		Fixture fixture = buildFixture(helper);
+		BlockLocation homeSign = placeWallSign(helper, HOME_X, 3, Z_SIGN, Direction.NORTH);
+		clearRegistration(fixture, homeSign, absolute(helper, HOME_X, 2, Z_SIGN));
+		saveSign(fixture, homeSign, fixture.player(), fixture.homeName(), "");
+		Station home = station(helper, fixture, fixture.homeName());
+
+		buildPillar(helper, DEST_SIGN_X, DEST_SUPPORT_Z);
+		BlockLocation sideOneSign = placeWallSign(helper, DEST_SIGN_X, 3, Z_SIGN, Direction.NORTH);
+		BlockLocation sideOneButton = placeWallButton(helper, DEST_SIGN_X, 2, Z_SIGN, Direction.NORTH);
+		clearRegistration(fixture, sideOneSign, sideOneButton);
+		saveSign(fixture, sideOneSign, fixture.player(), fixture.homeName(), fixture.mineName());
+
+		buildPillar(helper, 5, DEST_SUPPORT_Z);
+		BlockLocation sideTwoSign = placeWallSign(helper, 5, 3, Z_SIGN, Direction.NORTH);
+		BlockLocation sideTwoButton = placeWallButton(helper, 5, 2, Z_SIGN, Direction.NORTH);
+		clearRegistration(fixture, sideTwoSign, sideTwoButton);
+		saveSign(fixture, sideTwoSign, fixture.player(), fixture.homeName(), fixture.mineName());
+
+		// The central pillar has no route and no button, only the m flag.
+		buildPillar(helper, 4, DEST_SUPPORT_Z);
+		buildExitPlatform(helper, 4, Z_EXIT);
+		ServerPlayer mover = opPlayer(helper, fixture, absolute(helper, 4, DOCK_Y, Z_EXIT));
+		BlockLocation centralSign = placeWallSign(helper, 4, 3, Z_SIGN, Direction.NORTH);
+		clearRegistration(fixture, centralSign, absolute(helper, 4, 2, Z_SIGN));
+		saveSignWithFlags(fixture, centralSign, mover, fixture.homeName(), "", "m");
+
+		BlockLocation centralDock = absolute(helper, 4, DOCK_Y, Z_RAIL);
+		BlockLocation centralExit = absolute(helper, 4, DOCK_Y, Z_EXIT);
+		check(helper, centralDock.equals(state(fixture).station(home.id()).orElseThrow().dock()),
+				"central m did not move the main dock");
+		check(helper, centralExit.equals(state(fixture).station(home.id()).orElseThrow().exit()),
+				"central m did not move the main exit");
+		SignMarker centralMarker = state(fixture).signMarker(fixture.dimension(), centralSign).orElse(null);
+		check(helper, centralMarker != null, "central main-only marker missing");
+		check(helper, !centralMarker.isAnchor() && !centralMarker.hasButton(),
+				"central main-only unit must not anchor or carry a button");
+		check(helper, home.id().equals(centralMarker.stationId()), "central marker owner mismatch");
+		check(helper, centralMarker.main(), "central marker is not main");
+		check(helper, state(fixture).signUnitCount(home.id()) == 4,
+				"unexpected unit count: " + state(fixture).signUnitCount(home.id()));
+		check(helper, state(fixture).bindings().stream()
+				.noneMatch(binding -> centralDock.equals(binding.sourceDock())),
+				"central main-only unit created a binding");
+
+		// A main-only unit is owned by its station: renaming line 2 is rejected and
+		// the previous text is restored.
+		String intruder = fixture.homeName().replace("Home", "Nope");
+		saveSignWithFlags(fixture, centralSign, mover, intruder, "", "m");
+		check(helper, fixture.homeName().equals(rawLine(fixture, centralSign, true, 1)),
+				"renaming a main-only unit was not reverted: " + rawLine(fixture, centralSign, true, 1));
+		check(helper, home.id().equals(state(fixture).signMarker(fixture.dimension(), centralSign)
+				.orElseThrow().stationId()), "renaming a main-only unit changed its owner");
+		check(helper, centralDock.equals(state(fixture).station(home.id()).orElseThrow().dock()),
+				"renaming a main-only unit moved the station main");
+
+		// Clearing m on the main-only unit leaves main sticky and the unit registered.
+		saveSignWithFlags(fixture, centralSign, mover, fixture.homeName(), "", "");
+		check(helper, state(fixture).mainMarkerForStation(home.id()).isEmpty(),
+				"clearing m did not clear the main flag");
+		check(helper, centralDock.equals(state(fixture).station(home.id()).orElseThrow().dock()),
+				"clearing m reverted the sticky main dock");
+		check(helper, state(fixture).signMarker(fixture.dimension(), centralSign).isPresent(),
+				"clearing m removed the station-only unit");
+
+		// With no main marker, m can move to a side unit and later back to central.
+		saveSignWithFlags(fixture, sideOneSign, mover, fixture.homeName(), fixture.mineName(), "m");
+		BlockLocation sideOneDock = absolute(helper, DEST_SIGN_X, DOCK_Y, Z_RAIL);
+		check(helper, sideOneDock.equals(state(fixture).station(home.id()).orElseThrow().dock()),
+				"m did not move to the side unit");
+		saveSignWithFlags(fixture, sideOneSign, mover, fixture.homeName(), fixture.mineName(), "");
+		saveSignWithFlags(fixture, centralSign, mover, fixture.homeName(), "", "m");
+		check(helper, centralDock.equals(state(fixture).station(home.id()).orElseThrow().dock()),
+				"central m did not move main back");
+
+		ServerPlayer mineBuilder = opPlayer(helper, fixture, absolute(helper, MINE_X, DOCK_Y, Z_EXIT));
+		BlockLocation mineSign = placeWallSign(helper, MINE_X, 3, Z_SIGN, Direction.NORTH);
+		BlockLocation mineButton = placeWallButton(helper, MINE_X, 2, Z_SIGN, Direction.NORTH);
+		clearRegistration(fixture, mineSign, mineButton);
+		saveSign(fixture, mineSign, mineBuilder, fixture.mineName(), fixture.homeName());
+		Station mine = station(helper, fixture, fixture.mineName());
+		Binding mineToHome = state(fixture).binding(fixture.dimension(), mineButton).orElse(null);
+		check(helper, mineToHome != null, "Mine -> Home binding missing");
+
+		finishScan(fixture, helper, home);
+		finishScan(fixture, helper, mine);
+		ServerPlayer traveller = opPlayer(helper, fixture, mine.exit());
+		TripId[] tripId = {null};
+		helper.onEachTick(() -> {
+			if (tripId[0] == null) {
+				if (fixture.railway().trips().activeCount()
+						>= fixture.railway().config().maxActiveTrips() - 1) {
+					return;
+				}
+				TripService.StartResult start = fixture.railway().trips().start(traveller, mineToHome);
+				if (start instanceof TripService.StartResult.Rejected rejected) {
+					throw helper.assertionException("trip to the central main was rejected: "
+							+ rejected.failure().code() + " " + rejected.failure().detail());
+				}
+				tripId[0] = ((TripService.StartResult.Started) start).id();
+				return;
+			}
+			for (var active : fixture.railway().trips().activeTrips()) {
+				if (active.id().equals(tripId[0])) {
+					return;
+				}
+			}
+			if (!traveller.blockPosition().equals(RailWorld.pos(centralExit))) {
+				throw helper.assertionException("passenger at " + traveller.blockPosition()
+						+ ", expected central main exit " + centralExit.shortString());
+			}
+			helper.succeed();
 		});
 	}
 
@@ -447,6 +824,7 @@ public final class SignGameTests implements CustomTestMethodInvoker {
 			String dimension,
 			String homeName,
 			String mineName,
+			String edgeName,
 			BlockLocation homeDock,
 			BlockLocation mineDock,
 			BlockLocation homeExit,
@@ -488,7 +866,7 @@ public final class SignGameTests implements CustomTestMethodInvoker {
 		BlockLocation homeExit = absolute(helper, HOME_X, DOCK_Y, Z_EXIT);
 		BlockLocation mineExit = absolute(helper, MINE_X, DOCK_Y, Z_EXIT);
 		return new Fixture(railway, level, server, player, dimension,
-				"Sign Home " + unique, "Sign Mine " + unique,
+				"Sign Home " + unique, "Sign Mine " + unique, "Sign Edge " + unique,
 				homeDock, mineDock, homeExit, mineExit);
 	}
 
@@ -557,7 +935,19 @@ public final class SignGameTests implements CustomTestMethodInvoker {
 			String from,
 			String to
 	) {
-		saveSignLines(fixture, sign, player, true, "[Railway]", from, to);
+		saveSignWithFlags(fixture, sign, player, from, to, "");
+	}
+
+	/** Saves all four lines so clearing the optional flag line is observable. */
+	private static void saveSignWithFlags(
+			Fixture fixture,
+			BlockLocation sign,
+			ServerPlayer player,
+			String from,
+			String to,
+			String flags
+	) {
+		saveSignLines(fixture, sign, player, true, "[Railway]", from, to, flags);
 	}
 
 	private static void saveSignLines(
@@ -569,12 +959,40 @@ public final class SignGameTests implements CustomTestMethodInvoker {
 			String line2,
 			String line3
 	) {
+		saveSignLines(fixture, sign, player, front, line1, line2, line3, "");
+	}
+
+	private static void saveSignLines(
+			Fixture fixture,
+			BlockLocation sign,
+			ServerPlayer player,
+			boolean front,
+			String line1,
+			String line2,
+			String line3,
+			String line4
+	) {
 		SignBlockEntity entity = signEntity(fixture, sign);
 		entity.setAllowedPlayerEditor(player.getUUID());
 		entity.updateSignText(player, front, List.of(
 				FilteredText.passThrough(line1),
 				FilteredText.passThrough(line2),
-				FilteredText.passThrough(line3)));
+				FilteredText.passThrough(line3),
+				FilteredText.passThrough(line4)));
+	}
+
+	private static void buildPillar(GameTestHelper helper, int x, int z) {
+		for (int y = 0; y <= PILLAR_TOP; y++) {
+			helper.setBlock(new BlockPos(x, y, z), Blocks.STONE);
+			helper.setBlock(new BlockPos(x, y, z - 1), Blocks.AIR);
+		}
+	}
+
+	private static void buildExitPlatform(GameTestHelper helper, int x, int z) {
+		helper.setBlock(new BlockPos(x, DOCK_Y - 1, z), Blocks.STONE);
+		for (int y = DOCK_Y; y <= PILLAR_TOP; y++) {
+			helper.setBlock(new BlockPos(x, y, z), Blocks.AIR);
+		}
 	}
 
 	private static SignBlockEntity signEntity(Fixture fixture, BlockLocation sign) {
@@ -606,7 +1024,11 @@ public final class SignGameTests implements CustomTestMethodInvoker {
 		}
 	}
 
-	private static void requireRouteStarts(
+	/**
+	 * Starts and aborts one route. Returns false when the shared server has no free
+	 * active-trip slot yet so the caller can retry on the next tick.
+	 */
+	private static boolean requireRouteStarts(
 			GameTestHelper helper,
 			Fixture fixture,
 			BlockLocation exit,
@@ -615,6 +1037,9 @@ public final class SignGameTests implements CustomTestMethodInvoker {
 		ServerPlayer player = opPlayer(helper, fixture, exit);
 		TripService.StartResult start = fixture.railway().trips().start(player, binding);
 		if (start instanceof TripService.StartResult.Rejected rejected) {
+			if (rejected.failure().code() == FailureCode.TRIP_LIMIT) {
+				return false;
+			}
 			throw helper.assertionException("route " + binding.fromStationId() + " -> " + binding.toStationId()
 					+ " rejected: " + rejected.failure().code() + " " + rejected.failure().detail());
 		}
@@ -624,6 +1049,7 @@ public final class SignGameTests implements CustomTestMethodInvoker {
 			throw helper.assertionException("route trip did not abort cleanly: " + abort);
 		}
 		player.teleportTo(exit.x() + 0.5, exit.y(), exit.z() + 0.5);
+		return true;
 	}
 
 	private static Station station(GameTestHelper helper, Fixture fixture, String name) {

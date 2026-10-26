@@ -23,8 +23,11 @@ import java.util.Set;
 
 /** JSON state under {@code <world>/railway/state.json}. */
 public final class JsonStateStore implements StateStore {
-	/** Schema 2 adds sign markers and dockless provisional stations. */
-	public static final int SCHEMA_VERSION = 2;
+	/**
+	 * Schema 2 adds sign markers and dockless provisional stations. Schema 3 adds the
+	 * binding source dock and marker station/main ownership.
+	 */
+	public static final int SCHEMA_VERSION = 3;
 	private static final Gson GSON = new GsonBuilder().setPrettyPrinting().disableHtmlEscaping().create();
 
 	private final Path file;
@@ -142,13 +145,19 @@ public final class JsonStateStore implements StateStore {
 		}
 		Set<String> buttons = new HashSet<>();
 		if (parsed.bindings != null) {
-			for (Binding binding : parsed.bindings) {
-				if (binding == null || binding.button() == null || binding.dimension() == null) {
+			for (Binding rawBinding : parsed.bindings) {
+				if (rawBinding == null || rawBinding.button() == null || rawBinding.dimension() == null) {
 					throw new StateStore.StateException("binding has missing required fields");
 				}
-				if (!ids.contains(binding.fromStationId()) || !ids.contains(binding.toStationId())) {
-					throw new StateStore.StateException("binding references unknown station: " + binding);
+				if (rawBinding.fromStationId() == null || rawBinding.toStationId() == null
+						|| !ids.contains(rawBinding.fromStationId()) || !ids.contains(rawBinding.toStationId())) {
+					throw new StateStore.StateException("binding references unknown station: " + rawBinding);
 				}
+				// Legacy bindings have no local source dock and depart from the station
+				// main dock until the owning sign is re-saved.
+				Binding binding = schema < 3 && rawBinding.sourceDock() != null
+						? rawBinding.withSourceDock(null)
+						: rawBinding;
 				String key = WorldState.bindingKey(binding.dimension(), binding.button());
 				if (!buttons.add(key)) {
 					throw new StateStore.StateException("duplicate binding for button " + key);
@@ -160,12 +169,14 @@ public final class JsonStateStore implements StateStore {
 		}
 		Set<String> markerSigns = new HashSet<>();
 		Set<String> markerButtons = new HashSet<>();
+		Set<StationId> mainStations = new HashSet<>();
 		if (parsed.signMarkers != null) {
-			for (SignMarker marker : parsed.signMarkers) {
-				if (marker == null || marker.dimension() == null || marker.sign() == null
-						|| marker.support() == null) {
+			for (SignMarker rawMarker : parsed.signMarkers) {
+				if (rawMarker == null || rawMarker.dimension() == null || rawMarker.sign() == null
+						|| rawMarker.support() == null) {
 					throw new StateStore.StateException("sign marker has missing required fields");
 				}
+				SignMarker marker = migrateMarker(rawMarker, state, schema);
 				String signKey = WorldState.signMarkerKey(marker.dimension(), marker.sign());
 				if (!markerSigns.add(signKey)) {
 					throw new StateStore.StateException("duplicate sign marker at " + signKey);
@@ -174,6 +185,18 @@ public final class JsonStateStore implements StateStore {
 					String buttonKey = WorldState.bindingKey(marker.dimension(), marker.button());
 					if (!markerButtons.add(buttonKey)) {
 						throw new StateStore.StateException("duplicate sign marker button " + buttonKey);
+					}
+				}
+				StationId owner = marker.ownerStationId();
+				if (owner != null) {
+					Station ownerStation = state.station(owner).orElse(null);
+					if (ownerStation == null) {
+						throw new StateStore.StateException(
+								"sign marker references unknown station: " + owner);
+					}
+					if (!ownerStation.dimension().equals(marker.dimension())) {
+						throw new StateStore.StateException(
+								"sign marker dimension does not match station: " + owner);
 					}
 				}
 				if (marker.anchorStationId() != null) {
@@ -185,6 +208,16 @@ public final class JsonStateStore implements StateStore {
 					if (!anchor.dimension().equals(marker.dimension())) {
 						throw new StateStore.StateException(
 								"sign marker dimension does not match station: " + marker.anchorStationId());
+					}
+				}
+				if (marker.main()) {
+					if (owner == null) {
+						throw new StateStore.StateException(
+								"main sign marker has no station at " + signKey);
+					}
+					if (!mainStations.add(owner)) {
+						throw new StateStore.StateException(
+								"multiple main sign markers for station: " + owner);
 					}
 				}
 				try {
@@ -238,6 +271,25 @@ public final class JsonStateStore implements StateStore {
 			}
 		}
 		return keys;
+	}
+
+	/**
+	 * Applies schema-3 marker defaults and infers the owning station: legacy markers have
+	 * no explicit stationId, so the anchor station or the from station of the marker's
+	 * button binding is used. A null stationId survives only when neither source exists.
+	 */
+	private static SignMarker migrateMarker(SignMarker marker, WorldState state, int schema) {
+		SignMarker migrated = schema < 3 && marker.main() ? marker.withMain(false) : marker;
+		if (migrated.stationId() != null) {
+			return migrated;
+		}
+		StationId inferred = migrated.anchorStationId();
+		if (inferred == null && migrated.button() != null) {
+			inferred = state.binding(migrated.dimension(), migrated.button())
+					.map(Binding::fromStationId)
+					.orElse(null);
+		}
+		return inferred == null ? migrated : migrated.withStationId(inferred);
 	}
 
 	private static Station withUniqueDisplayName(Station station, Set<String> assigned, Set<String> declared) {

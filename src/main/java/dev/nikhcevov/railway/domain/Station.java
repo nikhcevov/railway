@@ -74,4 +74,18 @@ public record Station(
 		}
 		return new Station(id, displayName, dimension, dock, value, yaw, enabled, newRevision);
 	}
+
+	/**
+	 * Replaces the station's main dock, exit, and yaw. The id, display name, dimension,
+	 * and enabled flag are preserved. A provisional station becomes anchored (but stays
+	 * disabled) when given a main dock.
+	 */
+	public Station withMain(BlockLocation newDock, BlockLocation newExit, float newExitYaw, long newRevision) {
+		return new Station(id, displayName, dimension, newDock, newExit, newExitYaw, enabled, newRevision);
+	}
+
+	/** Replaces the main dock, exit, and yaw without changing the station revision. */
+	public Station withMain(BlockLocation newDock, BlockLocation newExit, float newExitYaw) {
+		return withMain(newDock, newExit, newExitYaw, revision);
+	}
 }

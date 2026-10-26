@@ -20,6 +20,7 @@ class SignFormatTest {
 		assertEquals("Home Base", parsed.from());
 		assertEquals("Mine Station", parsed.to());
 		assertFalse(parsed.stationOnly());
+		assertFalse(parsed.main());
 	}
 
 	@Test
@@ -58,6 +59,102 @@ class SignFormatTest {
 		assertEquals(
 				SignFormat.parse(List.of(MARKER, "Home", "Mine")),
 				SignFormat.parse(MARKER, "Home", "Mine"));
+		SignFormat.Parsed parsed = assertInstanceOf(
+				SignFormat.Parsed.class,
+				SignFormat.parse(MARKER, "Home", "Mine"));
+		assertFalse(parsed.main());
+	}
+
+	@Test
+	void fourLineSignWithBlankFlagsHasNoMainFlag() {
+		SignFormat.Parsed parsed = assertInstanceOf(
+				SignFormat.Parsed.class,
+				SignFormat.parse(List.of(MARKER, "Home", "Mine", "   ")));
+
+		assertEquals("Home", parsed.from());
+		assertEquals("Mine", parsed.to());
+		assertFalse(parsed.main());
+		assertFalse(parsed.stationOnly());
+	}
+
+	@Test
+	void parsesMainFlagCaseInsensitively() {
+		SignFormat.Parsed lower = assertInstanceOf(
+				SignFormat.Parsed.class,
+				SignFormat.parse(List.of(MARKER, "Home", "Mine", "m")));
+		SignFormat.Parsed upper = assertInstanceOf(
+				SignFormat.Parsed.class,
+				SignFormat.parse(List.of(MARKER, "Home", "Mine", " \tM \n")));
+
+		assertTrue(lower.main());
+		assertTrue(upper.main());
+		assertEquals("Mine", upper.to());
+	}
+
+	@Test
+	void fourArgumentOverloadMatchesTheListOverload() {
+		assertEquals(
+				SignFormat.parse(List.of(MARKER, "Home", "Mine", "m")),
+				SignFormat.parse(MARKER, "Home", "Mine", "m"));
+		assertEquals(
+				SignFormat.parse(List.of(MARKER, "Home", "Mine", "")),
+				SignFormat.parse(MARKER, "Home", "Mine", null));
+	}
+
+	@Test
+	void stationOnlySignCanCarryMainFlag() {
+		SignFormat.Parsed parsed = assertInstanceOf(
+				SignFormat.Parsed.class,
+				SignFormat.parse(MARKER, "Home", "   ", "m"));
+
+		assertTrue(parsed.stationOnly());
+		assertTrue(parsed.main());
+	}
+
+	@Test
+	void lineThreeMIsADestinationNameNotAFlag() {
+		SignFormat.Parsed parsed = assertInstanceOf(
+				SignFormat.Parsed.class,
+				SignFormat.parse(List.of(MARKER, "Home", "m")));
+
+		assertEquals("m", parsed.to());
+		assertFalse(parsed.main());
+	}
+
+	@Test
+	void rejectsUnknownFlags() {
+		SignFormat.Rejected rejected = rejected(SignFormat.parse(MARKER, "Home", "Mine", "x"));
+		assertEquals(SignFormat.Error.INVALID_FLAGS, rejected.error());
+		assertTrue(rejected.detail().contains("x"));
+
+		assertEquals(SignFormat.Error.INVALID_FLAGS,
+				error(SignFormat.parse(List.of(MARKER, "Home", "Mine", "main"))));
+	}
+
+	@Test
+	void rejectsMultipleFlags() {
+		assertEquals(SignFormat.Error.INVALID_FLAGS,
+				error(SignFormat.parse(MARKER, "Home", "Mine", "m m")));
+		assertEquals(SignFormat.Error.INVALID_FLAGS,
+				error(SignFormat.parse(List.of(MARKER, "Home", "Mine", "m x"))));
+	}
+
+	@Test
+	void fourLineSignsStillValidateMarkerAndNames() {
+		assertEquals(SignFormat.Error.UNSUPPORTED_MARKER,
+				error(SignFormat.parse("[station]", "Home", "Mine", "m")));
+		assertEquals(SignFormat.Error.INVALID_MARKER,
+				error(SignFormat.parse("Railway", "Home", "Mine", "m")));
+		assertEquals(SignFormat.Error.MISSING_FROM,
+				error(SignFormat.parse(MARKER, "   ", "Mine", "m")));
+	}
+
+	@Test
+	void compatibilityConstructorDefaultsMainToFalse() {
+		SignFormat.Parsed parsed = new SignFormat.Parsed("Home", "Mine");
+
+		assertFalse(parsed.main());
+		assertFalse(parsed.stationOnly());
 	}
 
 	@Test
@@ -97,7 +194,9 @@ class SignFormatTest {
 		assertEquals(SignFormat.Error.LINE_COUNT,
 				error(SignFormat.parse(List.of(MARKER, "Home"))));
 		assertEquals(SignFormat.Error.LINE_COUNT,
-				error(SignFormat.parse(List.of(MARKER, "Home", "Mine", "Extra"))));
+				error(SignFormat.parse(List.of(MARKER, "Home", "Mine", "m", "Extra"))));
+		assertEquals(SignFormat.Error.LINE_COUNT,
+				error(SignFormat.parse(List.of())));
 		assertEquals(SignFormat.Error.LINE_COUNT, error(SignFormat.parse((List<String>) null)));
 	}
 
@@ -119,7 +218,11 @@ class SignFormatTest {
 		assertFalse(SignFormat.isKnownMarkerLine(""));
 	}
 
+	private static SignFormat.Rejected rejected(SignFormat.Result result) {
+		return assertInstanceOf(SignFormat.Rejected.class, result);
+	}
+
 	private static SignFormat.Error error(SignFormat.Result result) {
-		return assertInstanceOf(SignFormat.Rejected.class, result).error();
+		return rejected(result).error();
 	}
 }

@@ -13,6 +13,8 @@
   "error.sign_side": "This sign is registered on its other side.",
   "error.sign_locked": "This sign is already registered and cannot be changed.",
   "error.sign_self_binding": "A station cannot be its own destination.",
+  "error.sign_chain": "Sign unit is not connected to this station: %s",
+  "error.sign_main_conflict": "This station already has a main sign: %s",
   "error.destination_not_anchored": "Destination %s is not anchored yet.",
   "error.invalid_id": "Invalid station id: use [a-z0-9_-]{1,32}.",
   "error.invalid_name": "Display name must not be empty.",
@@ -96,6 +98,7 @@
   "sign.station_only": "Station %s anchored without a destination.",
   "sign.destination": "Destination %s -> %s registered.",
   "sign.updated": "Sign registration is up to date.",
+  "sign.main_moved": "Station %s main arrival moved to %s.",
 
   "scan.started": "Scan %s started (job %s).",
   "scan.status.missing": "No scan for %s.",

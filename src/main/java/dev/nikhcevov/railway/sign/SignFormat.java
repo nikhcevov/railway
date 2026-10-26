@@ -5,11 +5,14 @@ import java.util.Objects;
 import java.util.regex.Pattern;
 
 /**
- * Pure parser for the three text lines of a Railway service sign.
+ * Pure parser for the text lines of a Railway service sign.
  *
  * <p>Line 1 is the {@code [Railway]} marker (case-insensitive), line 2 is the
- * {@code from} station name, and line 3 is the {@code to} station name. A blank
- * line 3 is a station-only anchor, represented by an empty {@code to} name.
+ * {@code from} station name, line 3 is the {@code to} station name, and the
+ * optional line 4 carries flags. A blank line 3 is a station-only anchor,
+ * represented by an empty {@code to} name. A blank or missing line 4 means no
+ * flags; the only known flag is {@code m}, which marks the sign as the station's
+ * main arrival point.
  *
  * <p>Display labels are preserved; only surrounding whitespace is stripped and
  * internal whitespace is collapsed. No Minecraft classes are involved and the
@@ -17,7 +20,12 @@ import java.util.regex.Pattern;
  */
 public final class SignFormat {
 	public static final String MARKER = "[Railway]";
+	/** Minimum sign line count, kept for three-line compatibility. */
 	public static final int LINE_COUNT = 3;
+	/** Maximum sign line count, including the optional flags line. */
+	public static final int MAX_LINE_COUNT = 4;
+	/** The only recognized flag: make this unit the station's main arrival point. */
+	public static final String MAIN_FLAG = "m";
 
 	private static final Pattern WHITESPACE = Pattern.compile("\\s+");
 	private static final List<String> UNSUPPORTED_MARKERS = List.of("[go]", "[station]");
@@ -25,16 +33,29 @@ public final class SignFormat {
 	private SignFormat() {
 	}
 
-	/** Parses exactly three sign text lines in front-to-back order. */
+	/**
+	 * Parses three or four sign text lines in front-to-back order. A fourth line
+	 * is the optional flags line.
+	 */
 	public static Result parse(List<String> lines) {
-		if (lines == null || lines.size() != LINE_COUNT) {
-			return new Rejected(Error.LINE_COUNT, "expected " + LINE_COUNT + " sign lines");
+		if (lines == null || lines.size() < LINE_COUNT || lines.size() > MAX_LINE_COUNT) {
+			return new Rejected(Error.LINE_COUNT,
+					"expected " + LINE_COUNT + " or " + MAX_LINE_COUNT + " sign lines");
 		}
-		return parse(lines.get(0), lines.get(1), lines.get(2));
+		return parse(lines.get(0), lines.get(1), lines.get(2),
+				lines.size() == MAX_LINE_COUNT ? lines.get(3) : null);
 	}
 
-	/** Parses the three raw sign text lines. Null lines are treated as blank. */
+	/** Parses the three raw sign text lines; no flags line means no flags. */
 	public static Result parse(String markerLine, String fromLine, String toLine) {
+		return parse(markerLine, fromLine, toLine, null);
+	}
+
+	/**
+	 * Parses the three raw sign text lines plus the optional flags line. Null lines
+	 * are treated as blank.
+	 */
+	public static Result parse(String markerLine, String fromLine, String toLine, String flagsLine) {
 		String marker = normalize(markerLine);
 		if (marker.isEmpty()) {
 			return new Rejected(Error.MISSING_MARKER, "line 1 must be " + MARKER);
@@ -53,7 +74,21 @@ public final class SignFormat {
 			return new Rejected(Error.MISSING_FROM, "line 2 must name the source station");
 		}
 
-		return new Parsed(from, normalize(toLine));
+		String flags = normalize(flagsLine);
+		boolean main = false;
+		if (!flags.isEmpty()) {
+			String[] tokens = flags.split(" ");
+			if (tokens.length > 1) {
+				return new Rejected(Error.INVALID_FLAGS,
+						"expected at most one flag but got \"" + flags + "\"");
+			}
+			if (!tokens[0].equalsIgnoreCase(MAIN_FLAG)) {
+				return new Rejected(Error.INVALID_FLAGS, "unknown flag \"" + tokens[0] + "\"");
+			}
+			main = true;
+		}
+
+		return new Parsed(from, normalize(toLine), main);
 	}
 
 	/** Strips surrounding whitespace and collapses internal runs to one space. */
@@ -91,14 +126,21 @@ public final class SignFormat {
 	 * @param from normalized display name of the source station
 	 * @param to   normalized display name of the destination, empty for a
 	 *             station-only anchor
+	 * @param main whether the optional {@code m} flag marks this unit as the
+	 *             station's main arrival point
 	 */
-	public record Parsed(String from, String to) implements Result {
+	public record Parsed(String from, String to, boolean main) implements Result {
 		public Parsed {
 			Objects.requireNonNull(from, "from");
 			Objects.requireNonNull(to, "to");
 			if (from.isEmpty()) {
 				throw new IllegalArgumentException("from must not be blank");
 			}
+		}
+
+		/** Three-line compatibility constructor: no flags, so {@code main} is false. */
+		public Parsed(String from, String to) {
+			this(from, to, false);
 		}
 
 		public boolean stationOnly() {
@@ -116,7 +158,7 @@ public final class SignFormat {
 
 	/** Typed parse failure. */
 	public enum Error {
-		/** The sign did not provide exactly three lines. */
+		/** The sign did not provide three or four lines. */
 		LINE_COUNT,
 		/** Line 1 was blank. */
 		MISSING_MARKER,
@@ -125,6 +167,8 @@ public final class SignFormat {
 		/** Line 1 was not the {@code [Railway]} marker. */
 		INVALID_MARKER,
 		/** Line 2 was blank, so the source station is unknown. */
-		MISSING_FROM
+		MISSING_FROM,
+		/** Line 4 had an unknown or extra flag; only {@code m} is known. */
+		INVALID_FLAGS
 	}
 }

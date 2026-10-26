@@ -106,6 +106,17 @@ class JsonStateStoreTest {
 				""".formatted(dimension, signX, signX, buttonX, anchor).strip();
 	}
 
+	private static String ownedMarkerJson(String dimension, int signX, int buttonX,
+			String anchorId, String stationId, boolean main) {
+		String anchor = anchorId == null ? "null" : "{\"value\":\"" + anchorId + "\"}";
+		String owner = stationId == null ? "null" : "{\"value\":\"" + stationId + "\"}";
+		return """
+				{"dimension":"%s","sign":{"x":%d,"y":65,"z":0},"support":{"x":%d,"y":65,"z":1},\
+				"editedFront":true,"button":{"x":%d,"y":65,"z":2},"anchorStationId":%s,\
+				"stationId":%s,"main":%b}
+				""".formatted(dimension, signX, signX, buttonX, anchor, owner, main).strip();
+	}
+
 	private static Binding binding(String from, String to, BlockLocation button) {
 		return new Binding(DIMENSION, button, "minecraft:stone_button",
 				new StationId(from), new StationId(to));
@@ -241,7 +252,7 @@ class JsonStateStoreTest {
 	void futureSchemaIsRejectedAndFileIsLeftUntouched() throws IOException {
 		Path file = stateFile();
 		writeState("""
-				{"schemaVersion": 3, "revision": 7, "stations": [], "bindings": [], "trips": []}
+				{"schemaVersion": 4, "revision": 7, "stations": [], "bindings": [], "trips": []}
 				""");
 		byte[] original = Files.readAllBytes(file);
 
@@ -278,7 +289,7 @@ class JsonStateStoreTest {
 		assertEquals(expected, store.file());
 		assertTrue(Files.isRegularFile(expected));
 		String json = Files.readString(expected, StandardCharsets.UTF_8);
-		assertTrue(json.contains("\"schemaVersion\": 2"), json);
+		assertTrue(json.contains("\"schemaVersion\": 3"), json);
 	}
 
 	@Test
@@ -318,7 +329,7 @@ class JsonStateStoreTest {
 	}
 
 	@Test
-	void versionOneStateIsBackedUpAndMigratedToVersionTwo() throws IOException, StateStore.StateException {
+	void versionOneStateIsBackedUpAndMigratedToVersionThree() throws IOException, StateStore.StateException {
 		String original = """
 				{"schemaVersion": 1, "revision": 2, "stations": [%s, %s], "bindings": [%s], "trips": []}
 				""".formatted(ALPHA_JSON, BETA_JSON, BINDING_JSON);
@@ -330,6 +341,8 @@ class JsonStateStoreTest {
 		assertEquals(2, loaded.stations().size());
 		assertEquals(List.of(binding("alpha", "beta", new BlockLocation(5, 64, 5))),
 				List.copyOf(loaded.bindings()));
+		assertNull(loaded.bindings().iterator().next().sourceDock(),
+				"v1 bindings have no local source dock");
 		assertTrue(loaded.signMarkers().isEmpty());
 		Path backup = tempDir.resolve("railway").resolve("state.v1.bak");
 		assertTrue(Files.isRegularFile(backup), "migrating v1 must keep the rolling backup");
@@ -337,10 +350,12 @@ class JsonStateStoreTest {
 
 		store.save(loaded);
 		String saved = Files.readString(store.file(), StandardCharsets.UTF_8);
-		assertTrue(saved.contains("\"schemaVersion\": 2"), saved);
+		assertTrue(saved.contains("\"schemaVersion\": 3"), saved);
 		assertTrue(saved.contains("\"signMarkers\": []"), saved);
+		assertFalse(saved.contains("\"sourceDock\""), "a null source dock is omitted, not serialized");
 		WorldState reloaded = new JsonStateStore(tempDir).load();
 		assertEquals(1, reloaded.bindings().size());
+		assertNull(reloaded.bindings().iterator().next().sourceDock());
 		assertTrue(reloaded.signMarkers().isEmpty());
 	}
 
@@ -495,5 +510,160 @@ class JsonStateStoreTest {
 		StateStore.StateException dimension = assertThrows(StateStore.StateException.class,
 				() -> new JsonStateStore(tempDir).load());
 		assertTrue(dimension.getMessage().contains("dimension"), dimension::getMessage);
+	}
+
+	@Test
+	void bindingSourceDockAndMarkerStationMainRoundTrip() throws IOException, StateStore.StateException {
+		Station alpha = station("alpha", 5);
+		Station beta = station("beta", 6);
+		BlockLocation button = new BlockLocation(5, 65, 2);
+		BlockLocation sourceDock = new BlockLocation(3, 64, 4);
+		Binding binding = new Binding(DIMENSION, button, "minecraft:stone_button",
+				alpha.id(), beta.id(), sourceDock);
+		SignMarker main = new SignMarker(DIMENSION, new BlockLocation(5, 66, 0),
+				new BlockLocation(5, 66, 1), true, button, null, alpha.id(), true);
+		WorldState original = new WorldState();
+		original.addStation(alpha);
+		original.addStation(beta);
+		assertTrue(original.addBinding(binding));
+		assertTrue(original.addSignMarker(main));
+
+		JsonStateStore store = new JsonStateStore(tempDir);
+		store.save(original);
+		String json = Files.readString(store.file(), StandardCharsets.UTF_8);
+		assertTrue(json.contains("\"schemaVersion\": 3"), json);
+		assertTrue(json.contains("\"sourceDock\""), json);
+		assertTrue(json.contains("\"stationId\""), json);
+		assertTrue(json.contains("\"main\": true"), json);
+
+		WorldState loaded = new JsonStateStore(tempDir).load();
+
+		Binding loadedBinding = loaded.binding(DIMENSION, button).orElseThrow();
+		assertEquals(binding, loadedBinding);
+		assertEquals(sourceDock, loadedBinding.sourceDock());
+		SignMarker loadedMarker = loaded.signMarker(DIMENSION, main.sign()).orElseThrow();
+		assertEquals(main, loadedMarker);
+		assertEquals(alpha.id(), loadedMarker.stationId());
+		assertTrue(loadedMarker.main());
+		assertEquals(loadedMarker, loaded.mainMarkerForStation(alpha.id()).orElseThrow());
+		assertEquals(1, loaded.signUnitCount(alpha.id()));
+	}
+
+	@Test
+	void stationOwnedButtonlessMarkerRoundTrips() throws IOException, StateStore.StateException {
+		Station alpha = station("alpha", 5);
+		SignMarker main = new SignMarker(DIMENSION, new BlockLocation(5, 66, 0),
+				new BlockLocation(5, 66, 1), true, null, null, alpha.id(), true);
+		SignMarker attached = new SignMarker(DIMENSION, new BlockLocation(6, 66, 0),
+				new BlockLocation(6, 66, 1), true, null, null, alpha.id(), false);
+		WorldState original = new WorldState();
+		original.addStation(alpha);
+		assertTrue(original.addSignMarker(main));
+		assertTrue(original.addSignMarker(attached));
+
+		JsonStateStore store = new JsonStateStore(tempDir);
+		store.save(original);
+		String json = Files.readString(store.file(), StandardCharsets.UTF_8);
+		assertTrue(json.contains("\"schemaVersion\": 3"), json);
+		assertTrue(json.contains("\"main\": true"), json);
+
+		WorldState loaded = new JsonStateStore(tempDir).load();
+		SignMarker loadedMain = loaded.signMarker(DIMENSION, main.sign()).orElseThrow();
+		SignMarker loadedAttached = loaded.signMarker(DIMENSION, attached.sign()).orElseThrow();
+		assertEquals(main, loadedMain);
+		assertNull(loadedMain.button());
+		assertNull(loadedMain.anchorStationId());
+		assertEquals(alpha.id(), loadedMain.stationId());
+		assertTrue(loadedMain.main());
+		assertFalse(loadedAttached.main());
+		assertEquals(loadedMain, loaded.mainMarkerForStation(alpha.id()).orElseThrow());
+		assertTrue(loaded.hasMainMarker(alpha.id()));
+		assertEquals(2, loaded.signUnitCount(alpha.id()));
+		assertTrue(loaded.hasOtherSignMarkers(alpha.id(), DIMENSION, main.sign()));
+	}
+
+	@Test
+	void versionTwoStateMigratesToVersionThreeWithInferredMarkerOwners()
+			throws IOException, StateStore.StateException {
+		String bindingJson = """
+				{"dimension":"minecraft:overworld","button":{"x":6,"y":65,"z":2},\
+				"expectedButtonBlockId":"minecraft:stone_button",\
+				"fromStationId":{"value":"alpha"},"toStationId":{"value":"mine"}}
+				""".strip();
+		String anchorMarker = markerJson(DIMENSION, 20, 21, "alpha");
+		String destinationMarker = markerJson(DIMENSION, 6, 6, null);
+		String original = """
+				{"schemaVersion": 2, "revision": 4, "stations": [%s, %s, %s], "bindings": [%s],
+				 "signMarkers": [%s, %s], "trips": []}
+				""".formatted(ALPHA_JSON, BETA_JSON, PROVISIONAL_JSON, bindingJson,
+				anchorMarker, destinationMarker);
+		writeState(original);
+		JsonStateStore store = new JsonStateStore(tempDir);
+
+		WorldState loaded = store.load();
+
+		assertEquals(3, loaded.stations().size());
+		assertEquals(1, loaded.bindings().size());
+		Binding migratedBinding = loaded.bindings().iterator().next();
+		assertNull(migratedBinding.sourceDock(), "legacy bindings keep the station main dock");
+
+		SignMarker anchor = loaded.signMarker(DIMENSION, new BlockLocation(20, 65, 0)).orElseThrow();
+		assertEquals(new StationId("alpha"), anchor.stationId(), "anchor markers own the anchor station");
+		assertFalse(anchor.main());
+		SignMarker destination = loaded.signMarker(DIMENSION, new BlockLocation(6, 65, 0)).orElseThrow();
+		assertEquals(new StationId("alpha"), destination.stationId(),
+				"destination markers infer the owner from their button binding");
+		assertNull(destination.anchorStationId());
+		assertFalse(destination.main());
+		Station migratedAlpha = loaded.station(new StationId("alpha")).orElseThrow();
+		assertEquals(new BlockLocation(0, 64, 0), migratedAlpha.dock(),
+				"migration preserves the station main dock");
+		assertEquals(new BlockLocation(1, 64, 0), migratedAlpha.exit(),
+				"migration preserves the station main exit");
+		assertEquals(90.0F, migratedAlpha.exitYaw());
+		assertEquals(new StationId("beta"), loaded.station(new StationId("beta")).orElseThrow().id(),
+				"unrelated stations survive migration");
+
+		Path backup = tempDir.resolve("railway").resolve("state.v2.bak");
+		assertTrue(Files.isRegularFile(backup), "migrating v2 must keep the rolling backup");
+		assertEquals(original, Files.readString(backup, StandardCharsets.UTF_8));
+
+		store.save(loaded);
+		String saved = Files.readString(store.file(), StandardCharsets.UTF_8);
+		assertTrue(saved.contains("\"schemaVersion\": 3"), saved);
+		assertTrue(saved.contains("\"stationId\": {"), saved);
+		WorldState reloaded = new JsonStateStore(tempDir).load();
+		assertEquals(new StationId("alpha"),
+				reloaded.signMarker(DIMENSION, new BlockLocation(6, 65, 0)).orElseThrow().stationId());
+		assertNull(reloaded.bindings().iterator().next().sourceDock());
+		assertFalse(reloaded.signMarker(DIMENSION, new BlockLocation(20, 65, 0)).orElseThrow().main());
+	}
+
+	@Test
+	void stateWithTwoMainMarkersForOneStationIsRejected() throws IOException {
+		writeState("""
+				{"schemaVersion": 3, "revision": 5, "stations": [%s, %s], "bindings": [],
+				 "signMarkers": [%s, %s], "trips": []}
+				""".formatted(ALPHA_JSON, BETA_JSON,
+				ownedMarkerJson(DIMENSION, 3, 4, "alpha", "alpha", true),
+				ownedMarkerJson(DIMENSION, 8, 9, null, "alpha", true)));
+
+		StateStore.StateException error = assertThrows(StateStore.StateException.class,
+				() -> new JsonStateStore(tempDir).load());
+
+		assertTrue(error.getMessage().contains("main sign marker"), error::getMessage);
+	}
+
+	@Test
+	void mainMarkerWithoutAnOwnerStationIsRejected() throws IOException {
+		writeState("""
+				{"schemaVersion": 3, "revision": 5, "stations": [%s], "bindings": [],
+				 "signMarkers": [%s], "trips": []}
+				""".formatted(ALPHA_JSON, ownedMarkerJson(DIMENSION, 3, 4, null, "ghost", true)));
+
+		StateStore.StateException error = assertThrows(StateStore.StateException.class,
+				() -> new JsonStateStore(tempDir).load());
+
+		assertTrue(error.getMessage().contains("unknown station"), error::getMessage);
 	}
 }

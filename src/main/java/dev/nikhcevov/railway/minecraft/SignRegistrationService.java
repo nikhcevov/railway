@@ -9,6 +9,7 @@ import dev.nikhcevov.railway.domain.SignMarker;
 import dev.nikhcevov.railway.domain.Station;
 import dev.nikhcevov.railway.domain.StationId;
 import dev.nikhcevov.railway.domain.StationNames;
+import dev.nikhcevov.railway.network.RailGraph;
 import dev.nikhcevov.railway.persistence.WorldState;
 import dev.nikhcevov.railway.sign.BlockSample;
 import dev.nikhcevov.railway.sign.DockResolution;
@@ -65,6 +66,12 @@ public final class SignRegistrationService {
 	private static final int SUPPORT_SCAN_DEPTH = 4;
 	private static final int EXIT_RADIUS = 4;
 	private static final int EXIT_VERTICAL_RANGE = 3;
+	/** A new unit must chain to an existing unit within this many horizontal blocks. */
+	private static final int MAX_CHAIN_STEP = 4;
+	/** A station may hold at most this many sign units. */
+	private static final int MAX_SIGN_UNITS = 16;
+	/** A station's sign units may span at most this many horizontal blocks from main. */
+	private static final int MAX_CHAIN_SPAN = 64;
 
 	private final Railway railway;
 	private final Logger logger;
@@ -153,11 +160,14 @@ public final class SignRegistrationService {
 		}
 
 		if (stationOnly && anchoredFrom) {
-			boolean anchorOnlyResave = marker != null
-					&& marker.anchorStationId() != null
-					&& marker.anchorStationId().equals(from.id())
-					&& marker.button() == null;
-			if (!anchorOnlyResave) {
+			// An existing buttonless unit may be re-saved (including clearing m). A new
+			// buttonless sign is only useful with m: it becomes the station main unit
+			// without a route. A destination unit may never drop its destination.
+			boolean unitResave = marker != null
+					&& marker.button() == null
+					&& from.id().equals(marker.ownerStationId());
+			boolean newMainOnly = marker == null && parsed.main();
+			if (!unitResave && !newMainOnly) {
 				return reject(player, sign, front, previous, marker,
 						Failure.detail(FailureCode.SIGN_FORMAT, "blank destination"));
 			}
@@ -189,16 +199,20 @@ public final class SignRegistrationService {
 			return reject(player, sign, front, previous, marker, identityFailure);
 		}
 
-		BlockLocation dock;
-		if (anchorMode) {
-			DockResolution resolution = PillarGeometry.resolveDock(signLocation, axis, blockView(level));
-			if (resolution instanceof DockResolution.Rejected rejected) {
-				return reject(player, sign, front, previous, marker,
-						Failure.detail(FailureCode.SIGN_GEOMETRY, rejected.error().name()));
+		// Every unit resolves its own local dock from its normal axis and rail. A
+		// destination unit departs from this dock; the station main is untouched.
+		DockResolution resolution = PillarGeometry.resolveDock(signLocation, axis, blockView(level));
+		if (resolution instanceof DockResolution.Rejected rejected) {
+			return reject(player, sign, front, previous, marker,
+					Failure.detail(FailureCode.SIGN_GEOMETRY, rejected.error().name()));
+		}
+		BlockLocation dock = ((DockResolution.Found) resolution).dock();
+
+		if (!anchorMode) {
+			Failure chainFailure = chainedUnitFailure(state, from, signLocation, support, dock, marker);
+			if (chainFailure != null) {
+				return reject(player, sign, front, previous, marker, chainFailure);
 			}
-			dock = ((DockResolution.Found) resolution).dock();
-		} else {
-			dock = from.dock();
 		}
 
 		if (countWallSigns(level, support, signLocation.y()) != 1) {
@@ -229,7 +243,7 @@ public final class SignRegistrationService {
 		}
 
 		PillarUnit unit = new PillarUnit(signLocation, support, axis, button);
-		PillarValidation validation = validateUnit(unit, dock, anchorMode, stationOnly, level);
+		PillarValidation validation = validateUnit(unit, dock, stationOnly, level);
 		if (validation instanceof PillarValidation.Invalid invalid) {
 			return reject(player, sign, front, previous, marker,
 					Failure.detail(failureCode(invalid.error()), invalid.error().name()));
@@ -240,9 +254,12 @@ public final class SignRegistrationService {
 		String buttonBlockId = "";
 		if (!stationOnly) {
 			buttonBlockId = railWorld.blockIdAt(button);
-			binding = new Binding(dimension, button, buttonBlockId, fromId, resolvedTo.id());
+			binding = new Binding(dimension, button, buttonBlockId, fromId, resolvedTo.id(), dock);
 			existingBinding = state.binding(dimension, button).orElse(null);
-			if (existingBinding != null && !existingBinding.equals(binding)) {
+			// A legacy binding has a null source dock. Its identity is unchanged, so a
+			// re-save may fill in the local dock instead of being rejected.
+			if (existingBinding != null
+					&& !existingBinding.withSourceDock(null).equals(binding.withSourceDock(null))) {
 				return reject(player, sign, front, previous, marker,
 						Failure.at(FailureCode.BUTTON_ALREADY_BOUND, button));
 			}
@@ -251,10 +268,24 @@ public final class SignRegistrationService {
 				return reject(player, sign, front, previous, marker,
 						Failure.at(FailureCode.BUTTON_ALREADY_BOUND, button));
 			}
+			Failure dockOwnerFailure = sourceDockOwnerFailure(state, dimension, fromId, existingBinding, dock);
+			if (dockOwnerFailure != null) {
+				return reject(player, sign, front, previous, marker, dockOwnerFailure);
+			}
+		}
+
+		StationId ownerId = anchorMode ? fromId : from.id();
+		if (parsed.main()) {
+			SignMarker currentMain = state.mainMarkerForStation(ownerId).orElse(null);
+			if (currentMain != null && !currentMain.sign().equals(signLocation)) {
+				return reject(player, sign, front, previous, marker,
+						Failure.detail(FailureCode.SIGN_MAIN_CONFLICT,
+								"clear the m flag on " + currentMain.sign().shortString() + " first"));
+			}
 		}
 
 		BlockLocation exit = null;
-		if (anchorMode) {
+		if (anchorMode || parsed.main()) {
 			exit = selectExit(level, railWorld, player, dock);
 			if (exit == null) {
 				return reject(player, sign, front, previous, marker, Failure.at(FailureCode.EXIT_UNSAFE, dock));
@@ -263,6 +294,7 @@ public final class SignRegistrationService {
 
 		Station stationFrom;
 		Station stationTo = null;
+		boolean mainMoved = false;
 		try {
 			if (anchorMode) {
 				if (from == null) {
@@ -276,6 +308,13 @@ public final class SignRegistrationService {
 				}
 			} else {
 				stationFrom = from;
+				if (parsed.main() && (!java.util.Objects.equals(from.dock(), dock)
+						|| !java.util.Objects.equals(from.exit(), exit)
+						|| Float.compare(from.exitYaw(), player.getYRot()) != 0)) {
+					stationFrom = from.withMain(dock, exit, player.getYRot(), state.nextRevision());
+					state.updateStation(stationFrom);
+					mainMoved = true;
+				}
 			}
 
 			if (resolvedTo != null) {
@@ -289,13 +328,20 @@ public final class SignRegistrationService {
 			}
 
 			if (binding != null) {
-				state.addBinding(binding);
+				if (existingBinding == null) {
+					state.addBinding(binding);
+				} else if (!existingBinding.equals(binding)) {
+					// Legacy bindings gain their local dock on re-save.
+					state.replaceBinding(binding);
+				}
 			}
 
 			StationId anchorStationId = anchorMode
 					? stationFrom.id()
 					: marker == null ? null : marker.anchorStationId();
-			SignMarker desiredMarker = new SignMarker(dimension, signLocation, support, front, button, anchorStationId);
+			StationId stationId = anchorMode ? stationFrom.id() : from.id();
+			SignMarker desiredMarker = new SignMarker(dimension, signLocation, support, front, button,
+					anchorStationId, stationId, parsed.main());
 			state.updateSignMarker(desiredMarker);
 			railway.saveState();
 
@@ -307,13 +353,14 @@ public final class SignRegistrationService {
 							stationFrom.displayName(), rejected.failure().code(), rejected.failure().detail());
 				}
 				refreshConnectedScans(stationFrom, stationFrom.id());
-			} else if (binding != null && existingBinding == null) {
-				// A new route between anchored stations needs both endpoints at the
-				// current revision. An idempotent re-save keeps the existing graphs.
+			} else if (mainMoved || (binding != null && existingBinding == null)) {
+				// A new route or a moved main needs both endpoints at the current
+				// revision. A main move plus a new binding still refreshes once.
 				refreshConnectedScans(stationFrom, null);
 			}
 
-			sendSuccess(player, stationFrom, stationTo, stationOnly, anchorMode, marker, existingBinding);
+			sendSuccess(player, stationFrom, stationTo, stationOnly, anchorMode, mainMoved,
+					marker, existingBinding);
 			if (anchorMode) {
 				level.sendParticles(ParticleTypes.END_ROD,
 						stationFrom.dock().x() + 0.5, stationFrom.dock().y() + 1.0,
@@ -377,7 +424,9 @@ public final class SignRegistrationService {
 		if (marker == null) {
 			return null;
 		}
-		if (marker.anchorStationId() != null && !marker.anchorStationId().equals(fromId)) {
+		// A registered unit is owned by exactly one station, including a buttonless
+		// main-only unit. Changing line 2 must not silently move that ownership.
+		if (marker.ownerStationId() != null && !marker.ownerStationId().equals(fromId)) {
 			return Failure.of(FailureCode.SIGN_LOCKED);
 		}
 		if (marker.button() != null) {
@@ -395,18 +444,96 @@ public final class SignRegistrationService {
 	private static PillarValidation validateUnit(
 			PillarUnit unit,
 			BlockLocation dock,
-			boolean anchorMode,
 			boolean stationOnly,
 			ServerLevel level
 	) {
 		SignBlockView view = blockView(level);
-		if (stationOnly) {
-			return PillarGeometry.validateAnchor(unit, dock, view);
+		return stationOnly
+				? PillarGeometry.validateAnchor(unit, dock, view)
+				: PillarGeometry.validate(unit, dock, view);
+	}
+
+	/**
+	 * Chaining and caps for a unit of an already anchored station. The first unit of a
+	 * command-created station needs no chain neighbour; a sign that is already
+	 * registered never has to satisfy the rule again.
+	 */
+	private Failure chainedUnitFailure(
+			WorldState state,
+			Station station,
+			BlockLocation sign,
+			BlockLocation support,
+			BlockLocation dock,
+			SignMarker marker
+	) {
+		List<SignMarker> others = new ArrayList<>();
+		for (SignMarker unit : state.signMarkersForStation(station.id())) {
+			if (unit.sign().equals(sign)) {
+				continue;
+			}
+			others.add(unit);
 		}
-		if (anchorMode) {
-			return PillarGeometry.validate(unit, dock, view);
+		if (others.size() >= MAX_SIGN_UNITS) {
+			return Failure.detail(FailureCode.SIGN_CHAIN,
+					"station already has " + others.size() + " sign units (max " + MAX_SIGN_UNITS + ")");
 		}
-		return PillarGeometry.validateDestination(unit, dock, view);
+		if (horizontalDistance(support, station.dock()) > MAX_CHAIN_SPAN) {
+			return Failure.detail(FailureCode.SIGN_CHAIN,
+					"pillar is farther than " + MAX_CHAIN_SPAN + " blocks from the station main dock");
+		}
+		RailGraph graph = railway.scans().graph(station.id());
+		if (graph != null && graph.rail(dock) == null) {
+			return Failure.detail(FailureCode.SIGN_GEOMETRY, "local dock is not on the station rail");
+		}
+		if (others.isEmpty()) {
+			return null;
+		}
+		if (marker == null) {
+			for (SignMarker unit : others) {
+				if (horizontalDistance(support, unit.support()) <= MAX_CHAIN_STEP) {
+					return null;
+				}
+			}
+			return Failure.detail(FailureCode.SIGN_CHAIN,
+					"place the pillar within " + MAX_CHAIN_STEP + " blocks of another station sign");
+		}
+		return null;
+	}
+
+	/** A local dock may not be shared by units of different stations. */
+	private static Failure sourceDockOwnerFailure(
+			WorldState state,
+			String dimension,
+			StationId fromId,
+			Binding existingBinding,
+			BlockLocation dock
+	) {
+		for (Station station : state.stations()) {
+			if (!station.dimension().equals(dimension) || !station.isAnchored()
+					|| !dock.equals(station.dock()) || station.id().equals(fromId)) {
+				continue;
+			}
+			return Failure.detail(FailureCode.SIGN_CHAIN,
+					"local dock " + dock.shortString() + " is the main dock of station "
+							+ station.displayName());
+		}
+		for (Binding other : state.bindings()) {
+			if (!other.dimension().equals(dimension) || !dock.equals(other.sourceDock())) {
+				continue;
+			}
+			if (existingBinding != null && other.equals(existingBinding)) {
+				continue;
+			}
+			if (!other.fromStationId().equals(fromId)) {
+				return Failure.detail(FailureCode.SIGN_CHAIN,
+						"local dock " + dock.shortString() + " belongs to another station");
+			}
+		}
+		return null;
+	}
+
+	private static double horizontalDistance(BlockLocation a, BlockLocation b) {
+		return Math.hypot(a.x() - b.x(), a.z() - b.z());
 	}
 
 	private static FailureCode failureCode(PillarError error) {
@@ -423,6 +550,7 @@ public final class SignRegistrationService {
 			Station to,
 			boolean stationOnly,
 			boolean anchoredNow,
+			boolean mainMoved,
 			SignMarker previousMarker,
 			Binding existingBinding
 	) {
@@ -434,6 +562,11 @@ public final class SignRegistrationService {
 				player.sendSystemMessage(Messages.text(player, "sign.anchored",
 						from.displayName(), from.dock().shortString()));
 			}
+			return;
+		}
+		if (mainMoved) {
+			player.sendSystemMessage(Messages.text(player, "sign.main_moved",
+					from.displayName(), from.dock().shortString()));
 			return;
 		}
 		if (!stationOnly && (previousMarker == null || existingBinding == null)) {
@@ -544,7 +677,10 @@ public final class SignRegistrationService {
 		}
 		if (marker.anchorStationId() != null) {
 			Station station = state.station(marker.anchorStationId()).orElse(null);
-			if (station != null && station.isAnchored() && station.enabled()) {
+			if (station != null && station.isAnchored() && station.enabled()
+					&& !state.hasOtherSignMarkers(station.id(), dimension, marker.sign())) {
+				// The last unit is gone: disable the station but keep its data. With
+				// other units left the station stays enabled and keeps its main.
 				state.updateStation(station.withEnabled(false, state.nextRevision()));
 				changed = true;
 			}
@@ -711,7 +847,8 @@ public final class SignRegistrationService {
 		return List.of(
 				text.getMessage(0, false).getString(),
 				text.getMessage(1, false).getString(),
-				text.getMessage(2, false).getString()
+				text.getMessage(2, false).getString(),
+				text.getMessage(3, false).getString()
 		);
 	}
 }

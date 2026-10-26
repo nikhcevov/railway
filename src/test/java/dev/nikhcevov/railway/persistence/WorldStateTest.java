@@ -187,4 +187,141 @@ class WorldStateTest {
 		assertThrows(IllegalArgumentException.class, () -> new Station(new StationId("bad"), "Bad", DIMENSION,
 				null, null, 0.0F, true, 1));
 	}
+
+	@Test
+	void stationMainUpdateReplacesDockExitAndYawOnly() {
+		Station home = anchored("home", "Home", 4);
+
+		Station moved = home.withMain(new BlockLocation(5, 70, 5), new BlockLocation(6, 70, 5), 45.0F, 9);
+
+		assertEquals(home.id(), moved.id());
+		assertEquals(home.displayName(), moved.displayName());
+		assertEquals(home.dimension(), moved.dimension());
+		assertTrue(moved.enabled());
+		assertEquals(9, moved.revision());
+		assertEquals(new BlockLocation(5, 70, 5), moved.dock());
+		assertEquals(new BlockLocation(6, 70, 5), moved.exit());
+		assertEquals(45.0F, moved.exitYaw());
+
+		Station sameRevision = home.withMain(new BlockLocation(7, 70, 5), new BlockLocation(8, 70, 5), 0.0F);
+		assertEquals(home.revision(), sameRevision.revision(), "the short form keeps the revision");
+		assertEquals(new BlockLocation(7, 70, 5), sameRevision.dock());
+		assertEquals(new BlockLocation(8, 70, 5), sameRevision.exit());
+	}
+
+	@Test
+	void markersForStationExposeOwnedAndAnchoredUnits() {
+		WorldState state = new WorldState();
+		Station home = anchored("home", "Home", 1);
+		Station other = anchored("other", "Other", 2);
+		state.addStation(home);
+		state.addStation(other);
+		BlockLocation anchorSign = new BlockLocation(3, 65, 0);
+		BlockLocation anchorButton = new BlockLocation(4, 65, 2);
+		BlockLocation destinationSign = new BlockLocation(8, 65, 0);
+		BlockLocation destinationButton = new BlockLocation(9, 65, 2);
+		BlockLocation foreignSign = new BlockLocation(20, 65, 0);
+		SignMarker anchorUnit = new SignMarker(DIMENSION, anchorSign, new BlockLocation(3, 65, 1),
+				true, anchorButton, home.id(), home.id(), true);
+		SignMarker destinationUnit = new SignMarker(DIMENSION, destinationSign,
+				new BlockLocation(8, 65, 1), true, destinationButton, null, home.id(), false);
+		SignMarker foreignUnit = new SignMarker(DIMENSION, foreignSign, new BlockLocation(20, 65, 1),
+				true, new BlockLocation(21, 65, 2), other.id(), other.id(), false);
+		assertTrue(state.addSignMarker(anchorUnit));
+		assertTrue(state.addSignMarker(destinationUnit));
+		assertTrue(state.addSignMarker(foreignUnit));
+
+		assertEquals(List.of(anchorUnit, destinationUnit), state.signMarkersForStation(home.id()));
+		assertEquals(2, state.signUnitCount(home.id()));
+		assertEquals(anchorUnit, state.mainMarkerForStation(home.id()).orElseThrow());
+		assertTrue(state.hasMainMarker(home.id()));
+		assertFalse(state.hasMainMarker(other.id()));
+		assertEquals(List.of(foreignUnit), state.signMarkersForStation(other.id()));
+		assertTrue(state.hasOtherSignMarkers(home.id(), DIMENSION, anchorSign));
+		assertTrue(state.hasOtherSignMarkers(home.id(), DIMENSION, destinationSign));
+		assertFalse(state.hasOtherSignMarkers(other.id(), DIMENSION, foreignSign));
+	}
+
+	@Test
+	void onlyOneMainMarkerPerStation() {
+		WorldState state = new WorldState();
+		Station home = anchored("home", "Home", 1);
+		state.addStation(home);
+		BlockLocation firstSign = new BlockLocation(3, 65, 0);
+		SignMarker first = new SignMarker(DIMENSION, firstSign, new BlockLocation(3, 65, 1),
+				true, new BlockLocation(4, 65, 2), home.id(), home.id(), true);
+		SignMarker second = new SignMarker(DIMENSION, new BlockLocation(8, 65, 0),
+				new BlockLocation(8, 65, 1), true, new BlockLocation(9, 65, 2), null, home.id(), true);
+
+		assertTrue(state.addSignMarker(first));
+		assertThrows(IllegalStateException.class, () -> state.addSignMarker(second));
+		assertThrows(IllegalStateException.class, () -> state.updateSignMarker(second));
+		assertEquals(first, state.mainMarkerForStation(home.id()).orElseThrow());
+		assertTrue(state.signMarker(DIMENSION, second.sign()).isEmpty());
+
+		long revisionBefore = state.revision();
+		SignMarker cleared = state.clearMainMarker(home.id()).orElseThrow();
+		assertFalse(cleared.main());
+		assertEquals(first.withMain(false), cleared);
+		assertEquals(revisionBefore + 1, state.revision());
+		assertTrue(state.mainMarkerForStation(home.id()).isEmpty());
+		assertTrue(state.clearMainMarker(home.id()).isEmpty(), "a second clear is a no-op");
+		assertEquals(revisionBefore + 1, state.revision());
+
+		assertTrue(state.addSignMarker(second), "a marker can take over main after the old one is cleared");
+		assertEquals(second, state.mainMarkerForStation(home.id()).orElseThrow());
+	}
+
+	@Test
+	void markerOwnershipMustMatchKnownStationsAndDimensions() {
+		WorldState state = new WorldState();
+		Station home = anchored("home", "Home", DIMENSION, 1);
+		Station nether = anchored("nether", "Nether", NETHER, 2);
+		state.addStation(home);
+		state.addStation(nether);
+
+		assertThrows(IllegalStateException.class, () -> state.addSignMarker(new SignMarker(DIMENSION,
+				new BlockLocation(3, 65, 0), new BlockLocation(3, 65, 1), true,
+				new BlockLocation(4, 65, 2), null, new StationId("ghost"), false)));
+		assertThrows(IllegalStateException.class, () -> state.addSignMarker(new SignMarker(DIMENSION,
+				new BlockLocation(8, 65, 0), new BlockLocation(8, 65, 1), true,
+				new BlockLocation(9, 65, 2), null, nether.id(), false)));
+		assertTrue(state.addSignMarker(new SignMarker(DIMENSION, new BlockLocation(12, 65, 0),
+				new BlockLocation(12, 65, 1), true, new BlockLocation(13, 65, 2), null, home.id(), false)));
+	}
+
+	@Test
+	void provisionalPruningAccountsForMarkerStationOwnership() {
+		WorldState state = new WorldState();
+		Station pending = provisional("pending", "Pending", 1);
+		state.addStation(pending);
+		BlockLocation sign = new BlockLocation(3, 65, 0);
+		SignMarker marker = new SignMarker(DIMENSION, sign, new BlockLocation(3, 65, 1),
+				true, new BlockLocation(4, 65, 2), null, pending.id(), false);
+		assertTrue(state.addSignMarker(marker));
+
+		assertTrue(state.pruneProvisionalStations().isEmpty());
+		assertTrue(state.station(pending.id()).isPresent(),
+				"a marker owning the provisional station keeps it alive");
+
+		assertTrue(state.removeSignMarker(DIMENSION, sign).isPresent());
+		assertEquals(List.of(pending), state.pruneProvisionalStations());
+		assertTrue(state.station(pending.id()).isEmpty());
+	}
+
+	@Test
+	void removingAStationClearsMarkersItOwns() {
+		WorldState state = new WorldState();
+		Station home = anchored("home", "Home", 1);
+		Station mine = anchored("mine", "Mine", 2);
+		state.addStation(home);
+		state.addStation(mine);
+		assertTrue(state.addSignMarker(new SignMarker(DIMENSION, new BlockLocation(3, 65, 0),
+				new BlockLocation(3, 65, 1), true, new BlockLocation(4, 65, 2), null, home.id(), false)));
+
+		state.removeStation(home.id());
+
+		assertTrue(state.signMarkers().isEmpty());
+		assertTrue(state.station(mine.id()).isPresent());
+	}
 }

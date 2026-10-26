@@ -91,9 +91,9 @@ public final class WorldState {
 	}
 
 	/**
-	 * Removes a station, its bindings, and markers that reference it. Marker removal is
-	 * limited to the explicitly removed station's anchor/bindings; other station data is
-	 * never touched by marker lifecycle.
+	 * Removes a station, its bindings, and markers that reference it. Marker removal
+	 * covers units owned by the station, markers anchored by it, and markers whose button
+	 * binding was removed; other station data is never touched by marker lifecycle.
 	 */
 	public List<Binding> removeStation(StationId id) {
 		stations.remove(id);
@@ -113,7 +113,7 @@ public final class WorldState {
 		}
 		signMarkers.entrySet().removeIf(entry -> {
 			SignMarker marker = entry.getValue();
-			if (id.equals(marker.anchorStationId())) {
+			if (id.equals(marker.stationId()) || id.equals(marker.anchorStationId())) {
 				return true;
 			}
 			return marker.button() != null
@@ -149,7 +149,7 @@ public final class WorldState {
 
 	private boolean hasMarkerReference(StationId id) {
 		for (SignMarker marker : signMarkers.values()) {
-			if (id.equals(marker.anchorStationId())) {
+			if (id.equals(marker.stationId()) || id.equals(marker.anchorStationId())) {
 				return true;
 			}
 		}
@@ -184,6 +184,20 @@ public final class WorldState {
 			revision++;
 		}
 		return added;
+	}
+
+	/**
+	 * Registers or replaces the binding at its button. Used when re-saving an existing
+	 * sign gains or changes its local source dock without changing its identity.
+	 */
+	public boolean replaceBinding(Binding binding) {
+		Objects.requireNonNull(binding, "binding");
+		Binding previous = bindings.put(bindingKey(binding.dimension(), binding.button()), binding);
+		if (!binding.equals(previous)) {
+			revision++;
+			return true;
+		}
+		return false;
 	}
 
 	public Optional<Binding> removeBinding(String dimension, BlockLocation button) {
@@ -229,18 +243,86 @@ public final class WorldState {
 		return false;
 	}
 
+	/** All markers owned by or anchored at this station, in registration order. */
+	public List<SignMarker> signMarkersForStation(StationId id) {
+		Objects.requireNonNull(id, "id");
+		List<SignMarker> markers = new ArrayList<>();
+		for (SignMarker marker : signMarkers.values()) {
+			if (id.equals(marker.stationId()) || id.equals(marker.anchorStationId())) {
+				markers.add(marker);
+			}
+		}
+		return List.copyOf(markers);
+	}
+
+	/** Number of registered sign units (anchor and destination) of this station. */
+	public int signUnitCount(StationId id) {
+		return signMarkersForStation(id).size();
+	}
+
+	/** The marker currently holding this station's main dock/exit, when one is flagged. */
+	public Optional<SignMarker> mainMarkerForStation(StationId id) {
+		Objects.requireNonNull(id, "id");
+		for (SignMarker marker : signMarkers.values()) {
+			if (marker.main() && id.equals(marker.ownerStationId())) {
+				return Optional.of(marker);
+			}
+		}
+		return Optional.empty();
+	}
+
+	public boolean hasMainMarker(StationId id) {
+		return mainMarkerForStation(id).isPresent();
+	}
+
+	/** True when this station has a sign unit other than the one at {@code sign}. */
+	public boolean hasOtherSignMarkers(StationId id, String dimension, BlockLocation sign) {
+		Objects.requireNonNull(id, "id");
+		Objects.requireNonNull(dimension, "dimension");
+		Objects.requireNonNull(sign, "sign");
+		for (SignMarker marker : signMarkers.values()) {
+			if (!id.equals(marker.stationId()) && !id.equals(marker.anchorStationId())) {
+				continue;
+			}
+			if (!marker.dimension().equals(dimension) || !marker.sign().equals(sign)) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/**
+	 * Clears the main flag from this station's current main marker so a different unit
+	 * can take over. Returns the updated marker, or empty when no marker is flagged.
+	 */
+	public Optional<SignMarker> clearMainMarker(StationId id) {
+		Objects.requireNonNull(id, "id");
+		for (Map.Entry<String, SignMarker> entry : signMarkers.entrySet()) {
+			SignMarker marker = entry.getValue();
+			if (marker.main() && id.equals(marker.ownerStationId())) {
+				SignMarker cleared = marker.withMain(false);
+				entry.setValue(cleared);
+				revision++;
+				return Optional.of(cleared);
+			}
+		}
+		return Optional.empty();
+	}
+
 	/**
 	 * Registers or replaces the marker at its sign. Returns false when the identical
-	 * marker is already registered. A button may only be owned by one marker.
+	 * marker is already registered. A button may only be owned by one marker and a
+	 * station by at most one main marker.
 	 */
 	public boolean updateSignMarker(SignMarker marker) {
 		Objects.requireNonNull(marker, "marker");
-		requireKnownAnchor(marker);
+		requireKnownStation(marker);
 		String key = signMarkerKey(marker.dimension(), marker.sign());
 		SignMarker existing = signMarkers.get(key);
 		if (existing != null && existing.equals(marker)) {
 			return false;
 		}
+		requireMainAvailable(marker, key);
 		if (marker.button() != null) {
 			for (SignMarker other : signMarkers.values()) {
 				if (other.dimension().equals(marker.dimension())
@@ -259,7 +341,7 @@ public final class WorldState {
 	/** Adds a marker. Returns false when the identical marker is already registered. */
 	public boolean addSignMarker(SignMarker marker) {
 		Objects.requireNonNull(marker, "marker");
-		requireKnownAnchor(marker);
+		requireKnownStation(marker);
 		String key = signMarkerKey(marker.dimension(), marker.sign());
 		SignMarker existing = signMarkers.get(key);
 		if (existing != null) {
@@ -268,6 +350,7 @@ public final class WorldState {
 			}
 			throw new IllegalStateException("sign marker already exists at " + marker.sign().shortString());
 		}
+		requireMainAvailable(marker, key);
 		if (marker.button() != null) {
 			Optional<SignMarker> buttonOwner = signMarkerForButton(marker.dimension(), marker.button());
 			if (buttonOwner.isPresent()) {
@@ -304,17 +387,48 @@ public final class WorldState {
 		return Optional.ofNullable(removed);
 	}
 
-	private void requireKnownAnchor(SignMarker marker) {
-		if (marker.anchorStationId() == null) {
+	/** A marker's owning and anchor stations must exist and share its dimension. */
+	private void requireKnownStation(SignMarker marker) {
+		StationId owner = marker.ownerStationId();
+		if (owner != null) {
+			Station station = stations.get(owner);
+			if (station == null) {
+				throw new IllegalStateException("sign marker references unknown station: " + owner);
+			}
+			if (!station.dimension().equals(marker.dimension())) {
+				throw new IllegalStateException("sign marker dimension does not match station: " + owner);
+			}
+		}
+		if (marker.anchorStationId() != null) {
+			Station anchor = stations.get(marker.anchorStationId());
+			if (anchor == null) {
+				throw new IllegalStateException("sign marker references unknown station: "
+						+ marker.anchorStationId());
+			}
+			if (!anchor.dimension().equals(marker.dimension())) {
+				throw new IllegalStateException("sign marker dimension does not match anchor station: "
+						+ marker.anchorStationId());
+			}
+		}
+	}
+
+	/** At most one marker per station may carry the main flag. */
+	private void requireMainAvailable(SignMarker marker, String selfKey) {
+		if (!marker.main()) {
 			return;
 		}
-		Station anchor = stations.get(marker.anchorStationId());
-		if (anchor == null) {
-			throw new IllegalStateException("sign marker references unknown station: " + marker.anchorStationId());
+		StationId owner = marker.ownerStationId();
+		if (owner == null) {
+			throw new IllegalStateException("a main sign marker must belong to a station");
 		}
-		if (!anchor.dimension().equals(marker.dimension())) {
-			throw new IllegalStateException("sign marker dimension does not match anchor station: "
-					+ marker.anchorStationId());
+		for (Map.Entry<String, SignMarker> entry : signMarkers.entrySet()) {
+			if (entry.getKey().equals(selfKey)) {
+				continue;
+			}
+			SignMarker other = entry.getValue();
+			if (other.main() && owner.equals(other.ownerStationId())) {
+				throw new IllegalStateException("station already has a main sign marker: " + owner);
+			}
 		}
 	}
 

@@ -41,84 +41,134 @@ public final class RailwayGameTests implements CustomTestMethodInvoker {
 	private static final int HOME_DOCK = 1;
 	private static final int MINE_DOCK = 6;
 
-	@GameTest(maxTicks = 400)
+	@GameTest(maxTicks = 600)
 	public void passengerTravelsHomeToMine(GameTestHelper helper) {
 		Fixture fixture = buildFixture(helper, "");
 		ServerPlayer player = fixture.newPlayer(helper, fixture.homeExit);
-		TripId trip = startOrFail(helper, fixture, player, fixture.homeToMine);
+		TripId[] trip = {null};
+		startWhenFree(helper, fixture, player, fixture.homeToMine, trip);
 		assertArrival(helper, fixture, player, fixture.mineExit, trip);
 	}
 
-	@GameTest(maxTicks = 400)
+	@GameTest(maxTicks = 600)
 	public void passengerTravelsMineToHome(GameTestHelper helper) {
 		Fixture fixture = buildFixture(helper, "r");
 		ServerPlayer player = fixture.newPlayer(helper, fixture.mineExit);
-		TripId trip = startOrFail(helper, fixture, player, fixture.mineToHome);
+		TripId[] trip = {null};
+		startWhenFree(helper, fixture, player, fixture.mineToHome, trip);
 		assertArrival(helper, fixture, player, fixture.homeExit, trip);
 	}
 
-	@GameTest(maxTicks = 400)
+	@GameTest(maxTicks = 600)
 	public void dismountDuringTripCleansUp(GameTestHelper helper) {
 		Fixture fixture = buildFixture(helper, "s");
 		ServerPlayer player = fixture.newPlayer(helper, fixture.homeExit);
-		TripId trip = startOrFail(helper, fixture, player, fixture.homeToMine);
-		helper.runAtTickTime(25, () -> {
+		TripId[] trip = {null};
+		int[] startedTick = {-1};
+		boolean[] dismounted = {false};
+		startWhenFree(helper, fixture, player, fixture.homeToMine, trip, startedTick);
+		helper.onEachTick(() -> {
+			if (trip[0] == null || dismounted[0]) {
+				return;
+			}
+			if (fixture.railway().server().getTickCount() - startedTick[0] < 25) {
+				return;
+			}
 			if (player.getVehicle() == null) {
-				helper.fail("passenger was not mounted before dismount");
+				throw helper.assertionException("passenger was not mounted before dismount");
 			}
 			player.stopRiding();
+			dismounted[0] = true;
 		});
 		helper.succeedWhen(() -> {
-			requireTripFinished(helper, fixture.railway, trip);
+			requireStarted(helper, trip);
+			requireTripFinished(helper, fixture.railway, trip[0]);
 			requireNoManagedCart(helper, fixture.level);
 		});
 	}
 
-	@GameTest(maxTicks = 400)
+	@GameTest(maxTicks = 600)
 	public void secondPlayerCannotStartSameLine(GameTestHelper helper) {
 		Fixture fixture = buildFixture(helper, "c");
 		ServerPlayer first = fixture.newPlayer(helper, fixture.homeExit);
 		ServerPlayer second = fixture.newPlayer(helper, fixture.homeExit);
-		TripId trip = startOrFail(helper, fixture, first, fixture.homeToMine);
-		TripService.StartResult secondStart = fixture.railway.trips().start(second, fixture.homeToMine);
-		if (!(secondStart instanceof TripService.StartResult.Rejected rejected)) {
-			helper.fail("second launch unexpectedly succeeded");
-			return;
-		}
-		Set<FailureCode> expected = Set.of(FailureCode.DOCK_OCCUPIED, FailureCode.PATH_OCCUPIED,
-				FailureCode.RESERVATION_CONFLICT);
-		if (!expected.contains(rejected.failure().code())) {
-			helper.fail("unexpected rejection: " + rejected.failure().code());
-		}
+		TripId[] trip = {null};
+		helper.onEachTick(() -> {
+			if (trip[0] != null) {
+				return;
+			}
+			if (fixture.railway().trips().activeCount()
+					>= fixture.railway().config().maxActiveTrips() - 1) {
+				return;
+			}
+			trip[0] = startIfReady(helper, fixture, first, fixture.homeToMine);
+			if (trip[0] == null) {
+				return;
+			}
+			TripService.StartResult secondStart = fixture.railway.trips().start(second, fixture.homeToMine);
+			if (!(secondStart instanceof TripService.StartResult.Rejected rejected)) {
+				throw helper.assertionException("second launch unexpectedly succeeded");
+			}
+			Set<FailureCode> expected = Set.of(FailureCode.DOCK_OCCUPIED, FailureCode.PATH_OCCUPIED,
+					FailureCode.RESERVATION_CONFLICT);
+			if (!expected.contains(rejected.failure().code())) {
+				throw helper.assertionException("unexpected rejection: " + rejected.failure().code());
+			}
+		});
 		helper.succeedWhen(() -> {
-			requireTripFinished(helper, fixture.railway, trip);
+			requireStarted(helper, trip);
+			requireTripFinished(helper, fixture.railway, trip[0]);
 			requireNoManagedCart(helper, fixture.level);
 		});
 	}
 
-	@GameTest(maxTicks = 400)
+	@GameTest(maxTicks = 600)
 	public void brokenRailAbortsSafely(GameTestHelper helper) {
 		Fixture fixture = buildFixture(helper, "b");
 		ServerPlayer player = fixture.newPlayer(helper, fixture.homeExit);
-		TripId trip = startOrFail(helper, fixture, player, fixture.homeToMine);
-		helper.runAtTickTime(25, () -> {
-			BlockPos broken = helper.absolutePos(new BlockPos(MINE_DOCK - 2, 1, 0));
-			helper.getLevel().setBlock(broken, Blocks.AIR.defaultBlockState(), 3);
+		TripId[] trip = {null};
+		int[] startedTick = {-1};
+		boolean[] broken = {false};
+		startWhenFree(helper, fixture, player, fixture.homeToMine, trip, startedTick);
+		helper.onEachTick(() -> {
+			if (trip[0] == null || broken[0]) {
+				return;
+			}
+			if (fixture.railway().server().getTickCount() - startedTick[0] < 25) {
+				return;
+			}
+			BlockPos brokenPos = helper.absolutePos(new BlockPos(MINE_DOCK - 2, 1, 0));
+			helper.getLevel().setBlock(brokenPos, Blocks.AIR.defaultBlockState(), 3);
+			broken[0] = true;
 		});
 		helper.succeedWhen(() -> {
-			requireTripFinished(helper, fixture.railway, trip);
+			requireStarted(helper, trip);
+			requireTripFinished(helper, fixture.railway, trip[0]);
 			requireNoManagedCart(helper, fixture.level);
 		});
 	}
 
-	@GameTest(maxTicks = 400)
+	@GameTest(maxTicks = 600)
 	public void disconnectCleansUpTrip(GameTestHelper helper) {
 		Fixture fixture = buildFixture(helper, "d");
 		ServerPlayer player = fixture.newPlayer(helper, fixture.homeExit);
-		TripId trip = startOrFail(helper, fixture, player, fixture.homeToMine);
-		helper.runAtTickTime(20, () -> fixture.railway().trips().playerLeft(player.getUUID()));
+		TripId[] trip = {null};
+		int[] startedTick = {-1};
+		boolean[] disconnected = {false};
+		startWhenFree(helper, fixture, player, fixture.homeToMine, trip, startedTick);
+		helper.onEachTick(() -> {
+			if (trip[0] == null || disconnected[0]) {
+				return;
+			}
+			if (fixture.railway().server().getTickCount() - startedTick[0] < 20) {
+				return;
+			}
+			fixture.railway().trips().playerLeft(player.getUUID());
+			disconnected[0] = true;
+		});
 		helper.succeedWhen(() -> {
-			requireTripFinished(helper, fixture.railway(), trip);
+			requireStarted(helper, trip);
+			requireTripFinished(helper, fixture.railway(), trip[0]);
 			requireNoManagedCart(helper, fixture.level());
 		});
 	}
@@ -159,19 +209,31 @@ public final class RailwayGameTests implements CustomTestMethodInvoker {
 		});
 	}
 
-	@GameTest(maxTicks = 100)
+	@GameTest(maxTicks = 600)
 	public void unsafeDestinationExitRejectsLaunch(GameTestHelper helper) {
 		Fixture fixture = buildFixture(helper, "e");
 		BlockPos support = helper.absolutePos(new BlockPos(MINE_DOCK, 0, 2));
 		helper.getLevel().setBlock(support, Blocks.AIR.defaultBlockState(), 3);
 		ServerPlayer player = fixture.newPlayer(helper, fixture.homeExit);
-		TripService.StartResult result = fixture.railway.trips().start(player, fixture.homeToMine);
-		if (!(result instanceof TripService.StartResult.Rejected rejected)
-				|| rejected.failure().code() != FailureCode.EXIT_UNSAFE) {
-			helper.fail("expected EXIT_UNSAFE, got " + result);
-		}
-		requireNoManagedCart(helper, fixture.level);
-		helper.succeed();
+		helper.onEachTick(() -> {
+			if (fixture.railway().trips().activeCount()
+					>= fixture.railway().config().maxActiveTrips() - 1) {
+				return;
+			}
+			TripService.StartResult result = fixture.railway.trips().start(player, fixture.homeToMine);
+			if (result instanceof TripService.StartResult.Rejected rejected) {
+				if (rejected.failure().code() == FailureCode.TRIP_LIMIT) {
+					return;
+				}
+				if (rejected.failure().code() != FailureCode.EXIT_UNSAFE) {
+					throw helper.assertionException("expected EXIT_UNSAFE, got " + rejected.failure().code());
+				}
+				requireNoManagedCart(helper, fixture.level);
+				helper.succeed();
+				return;
+			}
+			throw helper.assertionException("expected EXIT_UNSAFE, got " + result);
+		});
 	}
 
 	// ----------------------------------------------------------------- fixture
@@ -225,26 +287,64 @@ public final class RailwayGameTests implements CustomTestMethodInvoker {
 		return new Fixture(railway, level, home, mine, homeToMine, mineToHome, homeExit, mineExit);
 	}
 
-	private static TripId startOrFail(GameTestHelper helper, Fixture fixture, ServerPlayer player, Binding binding) {
+	/**
+	 * Starts a trip on the next tick that has a free active-trip slot. The shared
+	 * GameTest server runs many tests at once, so a direct start may see TRIP_LIMIT.
+	 */
+	private static void startWhenFree(GameTestHelper helper, Fixture fixture, ServerPlayer player,
+			Binding binding, TripId[] trip) {
+		startWhenFree(helper, fixture, player, binding, trip, new int[]{-1});
+	}
+
+	private static void startWhenFree(GameTestHelper helper, Fixture fixture, ServerPlayer player,
+			Binding binding, TripId[] trip, int[] startedTick) {
+		helper.onEachTick(() -> {
+			if (trip[0] != null) {
+				return;
+			}
+			if (fixture.railway().trips().activeCount()
+					>= fixture.railway().config().maxActiveTrips() - 1) {
+				return;
+			}
+			TripId started = startIfReady(helper, fixture, player, binding);
+			if (started == null) {
+				return;
+			}
+			trip[0] = started;
+			startedTick[0] = fixture.railway().server().getTickCount();
+			if (player.getVehicle() == null) {
+				throw helper.assertionException("passenger was not mounted");
+			}
+		});
+	}
+
+	/** Returns null when the only obstacle is the shared active-trip limit. */
+	private static TripId startIfReady(GameTestHelper helper, Fixture fixture, ServerPlayer player,
+			Binding binding) {
 		TripService.StartResult start = fixture.railway().trips().start(player, binding);
 		if (start instanceof TripService.StartResult.Rejected rejected) {
-			helper.fail("trip start rejected: " + rejected.failure().code() + " "
+			if (rejected.failure().code() == FailureCode.TRIP_LIMIT) {
+				return null;
+			}
+			throw helper.assertionException("trip start rejected: " + rejected.failure().code() + " "
 					+ (rejected.failure().detail() == null ? "" : rejected.failure().detail())
-					+ (rejected.failure().location() == null ? "" : " at " + rejected.failure().location().shortString()));
-			throw new IllegalStateException("unreachable");
+					+ (rejected.failure().location() == null ? ""
+							: " at " + rejected.failure().location().shortString()));
 		}
 		return ((TripService.StartResult.Started) start).id();
 	}
 
+	private static void requireStarted(GameTestHelper helper, TripId[] trip) {
+		if (trip[0] == null) {
+			throw helper.assertionException("trip did not start");
+		}
+	}
+
 	private static void assertArrival(GameTestHelper helper, Fixture fixture, ServerPlayer player, BlockLocation exit,
-			TripId trip) {
-		helper.runAtTickTime(5, () -> {
-			if (player.getVehicle() == null) {
-				helper.fail("passenger was not mounted");
-			}
-		});
+			TripId[] trip) {
 		helper.succeedWhen(() -> {
-			requireTripFinished(helper, fixture.railway(), trip);
+			requireStarted(helper, trip);
+			requireTripFinished(helper, fixture.railway(), trip[0]);
 			if (!player.blockPosition().equals(RailWorld.pos(exit))) {
 				throw helper.assertionException("player at " + player.blockPosition() + ", expected " + exit.shortString());
 			}

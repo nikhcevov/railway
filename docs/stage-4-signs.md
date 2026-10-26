@@ -4,6 +4,25 @@ Status: implementation contract for the first Stage 4 release. Supersedes the se
 station-sign / destination-sign model in `Railway-Spec-v1.md` sections 7, 10, and 14 for
 new registrations. Keep the old reservation, trip, and station behavior.
 
+## Stage 4.1 extension (implemented)
+
+`docs/stage-4-chain-local.md` extends this contract and wins where they differ:
+
+- Every unit, including a destination unit, resolves its own local dock from its sign
+  normal and rail; sign/button geometry and pillar distance are validated against that
+  local dock. Destination units no longer use station-main proximity.
+- A destination binding stores that local dock in `Binding.sourceDock` and departs,
+  boards, spawns, and reserves from it. Arrival stays at the station main dock/exit.
+  Legacy and command bindings keep `sourceDock = null` and the station-main fallback;
+  re-saving an old registered sign fills in its local dock.
+- Units of an anchored station chain: the new support column must be within 4
+  horizontal blocks of an existing unit, with at most 16 units and a 64-block span from
+  main. Violations are `SIGN_CHAIN`.
+- Optional sign line 4 `m` moves the station main dock/exit to that unit and marks its
+  marker. A second `m` on another unit is `SIGN_MAIN_CONFLICT` until the old flag is
+  cleared; clearing `m` leaves main sticky. Main moves rescan the station and connected
+  stations so graph revisions stay aligned.
+
 ## Goals
 
 - Remove mandatory long ASCII station IDs from signs.

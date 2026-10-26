@@ -192,11 +192,15 @@ public final class TripService {
 		if (lastPress != null && tick - lastPress < config.playerCooldownTicks()) {
 			return reject(FailureCode.COOLDOWN, Integer.toString(config.playerCooldownTicks()));
 		}
-		if (railway.state().hasAnchorMarker(from.id())) {
-			if (!PlayerActions.withinSignRadius(player, from.dock())) {
+		// Destination units depart from their own local dock. Legacy and command
+		// bindings keep the station main dock and its boarding behavior.
+		BlockLocation departureDock = binding.hasSourceDock() ? binding.sourceDock() : from.dock();
+		boolean signBoarding = binding.hasSourceDock() || railway.state().hasAnchorMarker(from.id());
+		if (signBoarding) {
+			if (!PlayerActions.withinSignRadius(player, departureDock)) {
 				return reject(FailureCode.PLAYER_TOO_FAR, "4");
 			}
-		} else if (!PlayerActions.withinRadius(player, from.dock(), config.boardingRadius())) {
+		} else if (!PlayerActions.withinRadius(player, departureDock, config.boardingRadius())) {
 			return reject(FailureCode.PLAYER_TOO_FAR, Integer.toString(config.boardingRadius()));
 		}
 
@@ -222,7 +226,7 @@ public final class TripService {
 		}
 
 		RailGraphPlanner.Result planned = RailGraphPlanner.plan(fromGraph, from.id(), to.id(),
-				from.dock(), to.dock(), config.maxRouteLength());
+				departureDock, to.dock(), config.maxRouteLength());
 		if (planned instanceof RailGraphPlanner.Result.Rejected rejected) {
 			return reject(rejected.failure());
 		}
@@ -247,6 +251,11 @@ public final class TripService {
 		for (Station station : railway.state().stations()) {
 			if (station.isAnchored()) {
 				docks.add(station.dock());
+			}
+		}
+		for (Binding other : railway.state().bindings()) {
+			if (other.hasSourceDock()) {
+				docks.add(other.sourceDock());
 			}
 		}
 		List<String> resources = RouteResourcePlanner.derive(fromGraph, plan, docks);
