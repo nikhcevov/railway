@@ -25,9 +25,10 @@ import java.util.Set;
 public final class JsonStateStore implements StateStore {
 	/**
 	 * Schema 2 adds sign markers and dockless provisional stations. Schema 3 adds the
-	 * binding source dock and marker station/main ownership.
+	 * binding source dock and marker station/main ownership. Schema 4 adds the trip
+	 * checkpoint dimension and block position used by crash recovery.
 	 */
-	public static final int SCHEMA_VERSION = 3;
+	public static final int SCHEMA_VERSION = 4;
 	private static final Gson GSON = new GsonBuilder().setPrettyPrinting().disableHtmlEscaping().create();
 
 	private final Path file;
@@ -239,10 +240,14 @@ public final class JsonStateStore implements StateStore {
 				if (!ids.contains(trip.from()) || !ids.contains(trip.to())) {
 					throw new StateStore.StateException("trip checkpoint references unknown station: " + trip.id());
 				}
-				if (trip.phase().isTerminal()) {
+				// Older checkpoints carry no position at all. A partially written
+				// position is normalized to "unknown" instead of disabling the state,
+				// because recovery can still reconcile such a checkpoint by cart UUID.
+				TripRecord checkpoint = schema < 4 ? trip.withoutCheckpoint() : trip;
+				if (checkpoint.phase().isTerminal()) {
 					continue;
 				}
-				trips.add(trip);
+				trips.add(checkpoint);
 			}
 		}
 		state.setTrips(trips);

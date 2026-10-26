@@ -2,6 +2,7 @@ package dev.nikhcevov.railway.gametest;
 
 import dev.nikhcevov.railway.domain.Binding;
 import dev.nikhcevov.railway.domain.BlockLocation;
+import dev.nikhcevov.railway.domain.FailureCode;
 import dev.nikhcevov.railway.domain.Station;
 import dev.nikhcevov.railway.domain.StationId;
 import dev.nikhcevov.railway.domain.TripId;
@@ -71,6 +72,9 @@ public final class ParallelGameTests implements CustomTestMethodInvoker {
 				}
 				TripService.StartResult one = railway.trips().start(first, firstBinding);
 				if (one instanceof TripService.StartResult.Rejected rejected) {
+					if (rejected.failure().code() == FailureCode.RECOVERY_PENDING) {
+						return;
+					}
 					throw helper.assertionException("first parallel trip rejected: " + rejected.failure().code());
 				}
 				TripService.StartResult two = railway.trips().start(second, secondBinding);

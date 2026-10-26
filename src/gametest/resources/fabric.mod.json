@@ -11,7 +11,8 @@
 			"dev.nikhcevov.railway.gametest.SpeedGameTests",
 			"dev.nikhcevov.railway.gametest.ParallelGameTests",
 			"dev.nikhcevov.railway.gametest.SignGameTests",
-			"dev.nikhcevov.railway.gametest.ChunkTicketGameTests"
+			"dev.nikhcevov.railway.gametest.ChunkTicketGameTests",
+			"dev.nikhcevov.railway.gametest.RecoveryGameTests"
 		]
 	},
 	"depends": {

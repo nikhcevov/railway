@@ -91,6 +91,9 @@ public final class TurnoutGameTests implements CustomTestMethodInvoker {
 			expectedExit[0] = pair.exit();
 			TripService.StartResult start = railway.trips().start(player, binding);
 			if (start instanceof TripService.StartResult.Rejected rejected) {
+				if (rejected.failure().code() == FailureCode.RECOVERY_PENDING) {
+					return;
+				}
 				throw helper.assertionException("trip " + completed[0] + " rejected: " + rejected.failure().code()
 						+ " " + rejected.failure().detail());
 			}
@@ -122,6 +125,9 @@ public final class TurnoutGameTests implements CustomTestMethodInvoker {
 			}
 			TripService.StartResult start = railway.trips().start(player, binding);
 			if (start instanceof TripService.StartResult.Rejected rejected) {
+				if (rejected.failure().code() == FailureCode.RECOVERY_PENDING) {
+					return;
+				}
 				throw helper.assertionException("trip rejected: " + rejected.failure().code() + " "
 						+ rejected.failure().detail());
 			}
@@ -166,6 +172,9 @@ public final class TurnoutGameTests implements CustomTestMethodInvoker {
 			}
 			TripService.StartResult start = railway.trips().start(player, binding);
 			if (start instanceof TripService.StartResult.Rejected rejected) {
+				if (rejected.failure().code() == FailureCode.RECOVERY_PENDING) {
+					return;
+				}
 				throw helper.assertionException("trip rejected: " + rejected.failure().code() + " "
 						+ rejected.failure().detail());
 			}
@@ -224,6 +233,9 @@ public final class TurnoutGameTests implements CustomTestMethodInvoker {
 				}
 				TripService.StartResult started = railway.trips().start(firstPlayer, toSouth);
 				if (started instanceof TripService.StartResult.Rejected rejected) {
+					if (rejected.failure().code() == FailureCode.RECOVERY_PENDING) {
+						return;
+					}
 					throw helper.assertionException("first trip rejected: " + rejected.failure().code());
 				}
 				first[0] = ((TripService.StartResult.Started) started).id();

@@ -57,6 +57,8 @@ public final class TripService {
 	private static final long WARNING_INTERVAL = 100;
 	/** Ticks the cart may wait for the ticket window to become entity-ticking. */
 	private static final int CHUNK_READY_WAIT_TICKS = 100;
+	/** Checkpoint cadence: a crash may rewind the recorded position by one second. */
+	private static final long CHECKPOINT_INTERVAL_TICKS = 20;
 
 	private final Railway railway;
 	private final Logger logger;
@@ -93,6 +95,8 @@ public final class TripService {
 		int ticketWindowStep = -1;
 		double lastX;
 		double lastZ;
+		long lastCheckpointTick;
+		TripPhase lastCheckpointPhase;
 
 		ActiveTrip(Trip trip, Minecart cart, RailWorld world, GraphRoutePlan plan, MotionProfile profile,
 				double safetyMargin, long graphRevision, int maxTripTicks, long departureTick,
@@ -158,6 +162,12 @@ public final class TripService {
 
 		if (railway.disabled()) {
 			return reject(FailureCode.DISABLED, railway.disabledReason());
+		}
+		// Interrupted checkpoints must be reconciled before a new cart is spawned,
+		// otherwise recovery could mistake the new cart for a crashed one.
+		if (railway.recovery().blocksNewTrips()) {
+			return reject(FailureCode.RECOVERY_PENDING,
+					Integer.toString(railway.recovery().pendingCount()));
 		}
 		if (byPlayer.containsKey(player.getUUID())) {
 			return reject(FailureCode.PLAYER_BUSY, null);
@@ -339,7 +349,8 @@ public final class TripService {
 			byCart.put(cart.getUUID(), tripId);
 			cooldowns.put(player.getUUID(), tick);
 			railway.state().addTrip(new TripRecord(tripId, player.getUUID(), cart.getUUID(),
-					plan.from(), plan.to(), TripPhase.BOARDING, tick));
+					plan.from(), plan.to(), TripPhase.BOARDING, tick, plan.dimension(),
+					RailWorld.loc(cart.blockPosition())));
 			railway.saveState();
 			Messages.actionBar(player, "actionbar.boarding");
 			return new StartResult.Started(tripId);
@@ -400,6 +411,9 @@ public final class TripService {
 			} catch (RuntimeException e) {
 				logger.error("Trip {} failed unexpectedly", id, e);
 				abort(at, tick, Failure.detail(FailureCode.INTERNAL, e.getMessage()));
+			}
+			if (active.get(id) == at) {
+				checkpoint(at, tick);
 			}
 		}
 		cooldowns.entrySet().removeIf(entry -> tick - entry.getValue() > 10 * 60 * 20L);
@@ -603,6 +617,26 @@ public final class TripService {
 			return Failure.detail(FailureCode.CHUNKS_NOT_READY, "ticket budget " + exceeded.budget());
 		}
 		return null;
+	}
+
+	/**
+	 * Persists the cart position for crash recovery. Writes on every phase change
+	 * and at most once per {@link #CHECKPOINT_INTERVAL_TICKS}; the checkpoint is
+	 * reconciliation data, not a claim about the entity.
+	 */
+	private void checkpoint(ActiveTrip at, long tick) {
+		TripPhase phase = at.trip.phase();
+		boolean phaseChanged = phase != at.lastCheckpointPhase;
+		if (!phaseChanged && tick - at.lastCheckpointTick < CHECKPOINT_INTERVAL_TICKS) {
+			return;
+		}
+		at.lastCheckpointPhase = phase;
+		at.lastCheckpointTick = tick;
+		boolean changed = railway.state().updateTripCheckpoint(at.trip.id(), at.plan.dimension(),
+				RailWorld.loc(at.cart.blockPosition()), phase);
+		if (changed) {
+			railway.saveState();
+		}
 	}
 
 	private boolean matchesStep(BlockLocation cartBlock, Minecart cart, RouteStep step) {
@@ -952,6 +986,16 @@ public final class TripService {
 		return byPlayer.containsKey(playerUuid);
 	}
 
+	/** Whether this trip is still driven by the runtime service. */
+	public boolean isActive(TripId id) {
+		return active.containsKey(id);
+	}
+
+	/** Whether a live trip owns the cart; recovery and the sweep must leave it alone. */
+	public boolean managesCart(UUID cartUuid) {
+		return byCart.containsKey(cartUuid);
+	}
+
 	public boolean stationInUse(StationId id) {
 		for (ActiveTrip at : active.values()) {
 			GraphRoutePlan plan = at.plan;
@@ -1022,7 +1066,11 @@ public final class TripService {
 		EntityTypeTest<Entity, Minecart> minecartType = EntityTypeTest.forClass(Minecart.class);
 		for (ServerLevel level : server.getAllLevels()) {
 			List<Minecart> carts = level.getEntities(minecartType, RailWorld.allEntities(), cart ->
-					cart.entityTags().contains(PlayerActions.MANAGED_TAG) && !byCart.containsKey(cart.getUUID()));
+					cart.entityTags().contains(PlayerActions.MANAGED_TAG)
+							&& !byCart.containsKey(cart.getUUID())
+							// A cart still referenced by an unresolved checkpoint is
+							// recovery's business, not an orphan yet.
+							&& !railway.recovery().isPendingCart(cart.getUUID()));
 			for (Minecart cart : carts) {
 				if (cart.isVehicle()) {
 					logger.warn("Orphan service cart {} still has passengers; leaving it stopped", cart.getUUID());

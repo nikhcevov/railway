@@ -134,6 +134,15 @@ class JsonStateStoreTest {
 				new StationId(from), new StationId(to), phase, startedTick);
 	}
 
+	private static TripRecord tripAt(String from, String to, TripPhase phase, long startedTick,
+			int discriminator, BlockLocation position) {
+		return new TripRecord(
+				new TripId(deterministicUuid("trip", discriminator)),
+				deterministicUuid("player", discriminator),
+				deterministicUuid("cart", discriminator),
+				new StationId(from), new StationId(to), phase, startedTick, DIMENSION, position);
+	}
+
 	@Test
 	void absentFileLoadsAnEmptyStateWithoutCreatingIt() throws IOException, StateStore.StateException {
 		JsonStateStore store = new JsonStateStore(tempDir);
@@ -187,6 +196,97 @@ class JsonStateStoreTest {
 		WorldState loaded = new JsonStateStore(tempDir).load();
 
 		assertEquals(List.of(active), loaded.trips(), "only non-terminal checkpoints are restored");
+	}
+
+	@Test
+	void schemaThreeCheckpointPositionIsDroppedOnMigration() throws IOException, StateStore.StateException {
+		String tripJson = """
+				{
+				  "id": {"value": "00000000-0000-0000-0000-000000000001"},
+				  "playerUuid": "00000000-0000-0000-0000-0000000000a1",
+				  "cartUuid": "00000000-0000-0000-0000-0000000000c1",
+				  "from": {"value": "alpha"},
+				  "to": {"value": "beta"},
+				  "phase": "RUNNING",
+				  "startedTick": 10,
+				  "dimension": "minecraft:overworld",
+				  "position": {"x": 5, "y": 64, "z": 7}
+				}
+				""";
+		String original = """
+				{"schemaVersion": 3, "revision": 2, "stations": [%s, %s], "bindings": [], "trips": [%s]}
+				""".formatted(ALPHA_JSON, BETA_JSON, tripJson);
+		writeState(original);
+		JsonStateStore store = new JsonStateStore(tempDir);
+
+		WorldState loaded = store.load();
+
+		assertEquals(1, loaded.trips().size());
+		TripRecord checkpoint = loaded.trips().getFirst();
+		assertNull(checkpoint.dimension(), "a schema-3 checkpoint has no dimension");
+		assertNull(checkpoint.position(), "a schema-3 checkpoint has no position");
+		assertFalse(checkpoint.hasPosition());
+		assertEquals(TripPhase.RUNNING, checkpoint.phase());
+		assertEquals(10, checkpoint.startedTick());
+		assertEquals(List.of(checkpoint), List.copyOf(loaded.trips()));
+		Path backup = tempDir.resolve("railway").resolve("state.v3.bak");
+		assertTrue(Files.isRegularFile(backup), "migrating v3 must keep the rolling backup");
+		assertEquals(original, Files.readString(backup, StandardCharsets.UTF_8));
+
+		store.save(loaded);
+		String saved = Files.readString(store.file(), StandardCharsets.UTF_8);
+		assertTrue(saved.contains("\"schemaVersion\": 4"), saved);
+		assertFalse(saved.contains("\"position\""), "a positionless checkpoint hides the position field");
+		WorldState reloaded = new JsonStateStore(tempDir).load();
+		assertEquals(List.of(checkpoint), reloaded.trips());
+	}
+
+	@Test
+	void checkpointPositionAndDimensionRoundTripInSchemaFour() throws IOException, StateStore.StateException {
+		WorldState state = new WorldState();
+		state.addStation(station("alpha", 1));
+		state.addStation(station("beta", 2));
+		TripRecord checkpoint = tripAt("alpha", "beta", TripPhase.RUNNING, 55, 4,
+				new BlockLocation(31, 70, -12));
+		state.addTrip(checkpoint);
+
+		JsonStateStore store = new JsonStateStore(tempDir);
+		store.save(state);
+		String json = Files.readString(store.file(), StandardCharsets.UTF_8);
+		assertTrue(json.contains("\"schemaVersion\": 4"), json);
+		assertTrue(json.contains("\"position\""), json);
+		assertTrue(json.contains("\"dimension\": \"minecraft:overworld\""), json);
+
+		WorldState loaded = new JsonStateStore(tempDir).load();
+		assertEquals(List.of(checkpoint), loaded.trips());
+		assertTrue(loaded.trip(checkpoint.id()).orElseThrow().hasPosition());
+		assertEquals(checkpoint.position(), loaded.trip(checkpoint.id()).orElseThrow().position());
+	}
+
+	@Test
+	void halfWrittenCheckpointPositionIsNormalizedWithoutInvalidatingState()
+			throws IOException, StateStore.StateException {
+		String tripJson = """
+				{
+				  "id": {"value": "00000000-0000-0000-0000-000000000002"},
+				  "playerUuid": "00000000-0000-0000-0000-0000000000a2",
+				  "cartUuid": "00000000-0000-0000-0000-0000000000c2",
+				  "from": {"value": "alpha"},
+				  "to": {"value": "beta"},
+				  "phase": "BOARDING",
+				  "startedTick": 20,
+				  "dimension": "minecraft:overworld"
+				}
+				""";
+		writeState("""
+				{"schemaVersion": 4, "revision": 2, "stations": [%s, %s], "bindings": [], "trips": [%s]}
+				""".formatted(ALPHA_JSON, BETA_JSON, tripJson));
+
+		WorldState loaded = new JsonStateStore(tempDir).load();
+
+		TripRecord checkpoint = loaded.trips().getFirst();
+		assertNull(checkpoint.dimension());
+		assertNull(checkpoint.position());
 	}
 
 	@Test
@@ -252,7 +352,7 @@ class JsonStateStoreTest {
 	void futureSchemaIsRejectedAndFileIsLeftUntouched() throws IOException {
 		Path file = stateFile();
 		writeState("""
-				{"schemaVersion": 4, "revision": 7, "stations": [], "bindings": [], "trips": []}
+				{"schemaVersion": 5, "revision": 7, "stations": [], "bindings": [], "trips": []}
 				""");
 		byte[] original = Files.readAllBytes(file);
 
@@ -289,7 +389,7 @@ class JsonStateStoreTest {
 		assertEquals(expected, store.file());
 		assertTrue(Files.isRegularFile(expected));
 		String json = Files.readString(expected, StandardCharsets.UTF_8);
-		assertTrue(json.contains("\"schemaVersion\": 3"), json);
+		assertTrue(json.contains("\"schemaVersion\": 4"), json);
 	}
 
 	@Test
@@ -329,7 +429,7 @@ class JsonStateStoreTest {
 	}
 
 	@Test
-	void versionOneStateIsBackedUpAndMigratedToVersionThree() throws IOException, StateStore.StateException {
+	void versionOneStateIsBackedUpAndMigratedToVersionFour() throws IOException, StateStore.StateException {
 		String original = """
 				{"schemaVersion": 1, "revision": 2, "stations": [%s, %s], "bindings": [%s], "trips": []}
 				""".formatted(ALPHA_JSON, BETA_JSON, BINDING_JSON);
@@ -350,7 +450,7 @@ class JsonStateStoreTest {
 
 		store.save(loaded);
 		String saved = Files.readString(store.file(), StandardCharsets.UTF_8);
-		assertTrue(saved.contains("\"schemaVersion\": 3"), saved);
+		assertTrue(saved.contains("\"schemaVersion\": 4"), saved);
 		assertTrue(saved.contains("\"signMarkers\": []"), saved);
 		assertFalse(saved.contains("\"sourceDock\""), "a null source dock is omitted, not serialized");
 		WorldState reloaded = new JsonStateStore(tempDir).load();
@@ -531,7 +631,7 @@ class JsonStateStoreTest {
 		JsonStateStore store = new JsonStateStore(tempDir);
 		store.save(original);
 		String json = Files.readString(store.file(), StandardCharsets.UTF_8);
-		assertTrue(json.contains("\"schemaVersion\": 3"), json);
+		assertTrue(json.contains("\"schemaVersion\": 4"), json);
 		assertTrue(json.contains("\"sourceDock\""), json);
 		assertTrue(json.contains("\"stationId\""), json);
 		assertTrue(json.contains("\"main\": true"), json);
@@ -564,7 +664,7 @@ class JsonStateStoreTest {
 		JsonStateStore store = new JsonStateStore(tempDir);
 		store.save(original);
 		String json = Files.readString(store.file(), StandardCharsets.UTF_8);
-		assertTrue(json.contains("\"schemaVersion\": 3"), json);
+		assertTrue(json.contains("\"schemaVersion\": 4"), json);
 		assertTrue(json.contains("\"main\": true"), json);
 
 		WorldState loaded = new JsonStateStore(tempDir).load();
@@ -583,7 +683,7 @@ class JsonStateStoreTest {
 	}
 
 	@Test
-	void versionTwoStateMigratesToVersionThreeWithInferredMarkerOwners()
+	void versionTwoStateMigratesToVersionFourWithInferredMarkerOwners()
 			throws IOException, StateStore.StateException {
 		String bindingJson = """
 				{"dimension":"minecraft:overworld","button":{"x":6,"y":65,"z":2},\
@@ -630,7 +730,7 @@ class JsonStateStoreTest {
 
 		store.save(loaded);
 		String saved = Files.readString(store.file(), StandardCharsets.UTF_8);
-		assertTrue(saved.contains("\"schemaVersion\": 3"), saved);
+		assertTrue(saved.contains("\"schemaVersion\": 4"), saved);
 		assertTrue(saved.contains("\"stationId\": {"), saved);
 		WorldState reloaded = new JsonStateStore(tempDir).load();
 		assertEquals(new StationId("alpha"),

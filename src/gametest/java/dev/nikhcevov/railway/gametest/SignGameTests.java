@@ -99,6 +99,9 @@ public final class SignGameTests implements CustomTestMethodInvoker {
 			check(helper, rejected instanceof TripService.StartResult.Rejected,
 					"launch should be rejected while Mine is provisional");
 			FailureCode code = ((TripService.StartResult.Rejected) rejected).failure().code();
+			if (code == FailureCode.RECOVERY_PENDING) {
+				return;
+			}
 			check(helper, code == FailureCode.DESTINATION_NOT_ANCHORED,
 					"expected DESTINATION_NOT_ANCHORED, got " + code);
 			helper.succeed();
@@ -579,7 +582,8 @@ public final class SignGameTests implements CustomTestMethodInvoker {
 				}
 				TripService.StartResult start = fixture.railway().trips().start(traveller, mineToHome);
 				if (start instanceof TripService.StartResult.Rejected rejected) {
-					if (rejected.failure().code() == FailureCode.TRIP_LIMIT) {
+					if (rejected.failure().code() == FailureCode.TRIP_LIMIT
+							|| rejected.failure().code() == FailureCode.RECOVERY_PENDING) {
 						return;
 					}
 					throw helper.assertionException("trip to the moved main was rejected: "
@@ -795,6 +799,9 @@ public final class SignGameTests implements CustomTestMethodInvoker {
 				}
 				TripService.StartResult start = fixture.railway().trips().start(traveller, mineToHome);
 				if (start instanceof TripService.StartResult.Rejected rejected) {
+					if (rejected.failure().code() == FailureCode.RECOVERY_PENDING) {
+						return;
+					}
 					throw helper.assertionException("trip to the central main was rejected: "
 							+ rejected.failure().code() + " " + rejected.failure().detail());
 				}
@@ -1133,7 +1140,8 @@ public final class SignGameTests implements CustomTestMethodInvoker {
 		ServerPlayer player = opPlayer(helper, fixture, exit);
 		TripService.StartResult start = fixture.railway().trips().start(player, binding);
 		if (start instanceof TripService.StartResult.Rejected rejected) {
-			if (rejected.failure().code() == FailureCode.TRIP_LIMIT) {
+			if (rejected.failure().code() == FailureCode.TRIP_LIMIT
+					|| rejected.failure().code() == FailureCode.RECOVERY_PENDING) {
 				return false;
 			}
 			throw helper.assertionException("route " + binding.fromStationId() + " -> " + binding.toStationId()

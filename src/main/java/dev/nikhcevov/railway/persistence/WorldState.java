@@ -6,6 +6,8 @@ import dev.nikhcevov.railway.domain.SignMarker;
 import dev.nikhcevov.railway.domain.Station;
 import dev.nikhcevov.railway.domain.StationId;
 import dev.nikhcevov.railway.domain.StationNames;
+import dev.nikhcevov.railway.domain.TripId;
+import dev.nikhcevov.railway.domain.TripPhase;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -447,7 +449,40 @@ public final class WorldState {
 		trips.add(record);
 	}
 
-	public void removeTrip(dev.nikhcevov.railway.domain.TripId tripId) {
+	/** Returns the checkpoint for the trip, if one is still stored. */
+	public Optional<TripRecord> trip(TripId tripId) {
+		for (TripRecord record : trips) {
+			if (record.id().equals(tripId)) {
+				return Optional.of(record);
+			}
+		}
+		return Optional.empty();
+	}
+
+	/**
+	 * Replaces the reconciliation state of a stored checkpoint. Unknown trips are
+	 * ignored so a late write can never resurrect a removed checkpoint.
+	 *
+	 * @return whether the stored checkpoint changed
+	 */
+	public boolean updateTripCheckpoint(TripId tripId, String dimension, BlockLocation position,
+			TripPhase phase) {
+		for (int i = 0; i < trips.size(); i++) {
+			TripRecord record = trips.get(i);
+			if (!record.id().equals(tripId)) {
+				continue;
+			}
+			TripRecord updated = record.withCheckpoint(dimension, position, phase);
+			if (updated.equals(record)) {
+				return false;
+			}
+			trips.set(i, updated);
+			return true;
+		}
+		return false;
+	}
+
+	public void removeTrip(TripId tripId) {
 		trips.removeIf(record -> record.id().equals(tripId));
 	}
 

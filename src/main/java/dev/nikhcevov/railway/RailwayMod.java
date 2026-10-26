@@ -10,12 +10,14 @@ import dev.nikhcevov.railway.minecraft.TripService;
 
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
+import net.fabricmc.fabric.api.event.lifecycle.v1.ServerChunkEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.fabricmc.fabric.api.event.player.PlayerBlockBreakEvents;
 import net.fabricmc.fabric.api.event.player.UseBlockCallback;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
 
+import net.minecraft.server.level.FullChunkStatus;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
@@ -51,10 +53,18 @@ public final class RailwayMod implements ModInitializer {
 			if (railway.disabled()) {
 				return;
 			}
+			railway.recovery().tick(server);
 			railway.scans().tick(server);
 			railway.trips().tick(server);
 			if (server.getTickCount() % MARKER_VERIFY_INTERVAL_TICKS == 0) {
 				railway.signs().verifyMarkers(server);
+			}
+		});
+		// Entity-ticking is the first moment a recovered chunk can be trusted to
+		// contain (or not contain) the checkpointed cart.
+		ServerChunkEvents.FULL_CHUNK_STATUS_CHANGE.register((level, chunk, oldStatus, newStatus) -> {
+			if (newStatus == FullChunkStatus.ENTITY_TICKING && Railway.isStarted()) {
+				Railway.get().recovery().onChunkReady(level, chunk);
 			}
 		});
 		UseBlockCallback.EVENT.register(RailwayMod::onUseBlock);
@@ -63,6 +73,11 @@ public final class RailwayMod implements ModInitializer {
 				Railway railway = Railway.get();
 				railway.scans().invalidate(RailWorld.loc(pos));
 				railway.signs().onBlockBreak(serverLevel, pos, state, blockEntity);
+			}
+		});
+		ServerPlayConnectionEvents.JOIN.register((handler, sender, server) -> {
+			if (Railway.isStarted() && handler.player != null) {
+				Railway.get().recovery().onPlayerJoin(handler.player);
 			}
 		});
 		ServerPlayConnectionEvents.DISCONNECT.register((handler, server) -> {

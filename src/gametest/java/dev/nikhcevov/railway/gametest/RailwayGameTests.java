@@ -203,6 +203,9 @@ public final class RailwayGameTests implements CustomTestMethodInvoker {
 			expectedExit[0] = forward ? fixture.mineExit() : fixture.homeExit();
 			TripService.StartResult start = railway.trips().start(player, binding);
 			if (start instanceof TripService.StartResult.Rejected rejected) {
+				if (rejected.failure().code() == FailureCode.RECOVERY_PENDING) {
+					return;
+				}
 				throw helper.assertionException("trip " + completed[0] + " rejected: " + rejected.failure().code());
 			}
 			current[0] = ((TripService.StartResult.Started) start).id();
@@ -222,7 +225,8 @@ public final class RailwayGameTests implements CustomTestMethodInvoker {
 			}
 			TripService.StartResult result = fixture.railway.trips().start(player, fixture.homeToMine);
 			if (result instanceof TripService.StartResult.Rejected rejected) {
-				if (rejected.failure().code() == FailureCode.TRIP_LIMIT) {
+				if (rejected.failure().code() == FailureCode.TRIP_LIMIT
+						|| rejected.failure().code() == FailureCode.RECOVERY_PENDING) {
 					return;
 				}
 				if (rejected.failure().code() != FailureCode.EXIT_UNSAFE) {
@@ -419,7 +423,8 @@ public final class RailwayGameTests implements CustomTestMethodInvoker {
 			Binding binding) {
 		TripService.StartResult start = fixture.railway().trips().start(player, binding);
 		if (start instanceof TripService.StartResult.Rejected rejected) {
-			if (rejected.failure().code() == FailureCode.TRIP_LIMIT) {
+			if (rejected.failure().code() == FailureCode.TRIP_LIMIT
+					|| rejected.failure().code() == FailureCode.RECOVERY_PENDING) {
 				return null;
 			}
 			throw helper.assertionException("trip start rejected: " + rejected.failure().code() + " "

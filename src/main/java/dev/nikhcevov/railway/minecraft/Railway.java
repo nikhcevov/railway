@@ -31,6 +31,7 @@ public final class Railway {
 	private ScanService scans;
 	private ChunkTicketManager tickets;
 	private TripService trips;
+	private RecoveryService recovery;
 	private SignRegistrationService signs;
 	private boolean disabled;
 	private String disabledReason;
@@ -110,13 +111,11 @@ public final class Railway {
 			state = new WorldState();
 		}
 
-		if (stateLoaded && !state.trips().isEmpty()) {
-			LOGGER.warn("Recovering {} interrupted trip checkpoint(s); they will not continue", state.trips().size());
-			tickets.releaseAll();
-			state.setTrips(List.of());
-			if (!disabled) {
-				saveState();
-			}
+		// Checkpoints are never discarded here: recovery reconciles them against
+		// the loaded world and blocks new trips only until it is done.
+		recovery = new RecoveryService(this, LOGGER, tickets);
+		if (stateLoaded) {
+			recovery.begin();
 		}
 		if (disabled) {
 			LOGGER.error("{}", Messages.format(Messages.Lang.EN, "system.disabled", disabledReason));
@@ -124,6 +123,9 @@ public final class Railway {
 	}
 
 	public void shutdown() {
+		if (recovery != null) {
+			recovery.shutdown();
+		}
 		if (trips != null) {
 			trips.shutdown();
 		}
@@ -154,6 +156,13 @@ public final class Railway {
 
 	public TripService trips() {
 		return trips;
+	}
+
+	public RecoveryService recovery() {
+		if (recovery == null) {
+			throw new IllegalStateException("Railway recovery is not initialized");
+		}
+		return recovery;
 	}
 
 	public ChunkTicketManager tickets() {
@@ -194,7 +203,9 @@ public final class Railway {
 	}
 
 	public void saveState() {
-		if (store == null || !stateLoaded || disabled) {
+		// Recovery cleans checkpoints even on a config-disabled server; only a state
+		// that failed to load must never be overwritten.
+		if (store == null || !stateLoaded) {
 			return;
 		}
 		try {
@@ -214,10 +225,6 @@ public final class Railway {
 			disabledReason = stateFailed ? stateFailureReason : null;
 			for (String warning : loaded.warnings()) {
 				LOGGER.warn("Railway config warning: {}", warning);
-			}
-			if (stateLoaded && !stateFailed && !state.trips().isEmpty()) {
-				state.setTrips(List.of());
-				saveState();
 			}
 			return null;
 		}

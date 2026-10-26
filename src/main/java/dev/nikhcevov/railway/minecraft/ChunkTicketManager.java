@@ -51,6 +51,19 @@ public final class ChunkTicketManager {
 					| TicketType.FLAG_CAN_EXPIRE_IF_UNLOADED
 	);
 
+	/**
+	 * One-shot ticket used by crash recovery to read the checkpoint chunk. It is
+	 * refreshed while recovery retries, expires on its own, and is never persisted.
+	 * Recovery only requests it for a chunk confirmed to exist in level storage, so
+	 * it cannot generate terrain.
+	 */
+	private static final TicketType RECOVERY_TICKET = new TicketType(
+			TICKET_TIMEOUT_TICKS,
+			TicketType.FLAG_LOADING
+					| TicketType.FLAG_SIMULATION
+					| TicketType.FLAG_CAN_EXPIRE_IF_UNLOADED
+	);
+
 	public sealed interface Update {
 		/** {@code enabled} is false when the configured budget disables tickets. */
 		record Applied(boolean enabled, int tickets, int pending) implements Update {
@@ -88,9 +101,31 @@ public final class ChunkTicketManager {
 		}
 	}
 
+	/** One recovery ticket held for one checkpoint. */
+	private static final class RecoveryState {
+		final ServerLevel level;
+		final Set<ChunkWindow.Key> held = new LinkedHashSet<>();
+		long acquisitions;
+		long releases;
+
+		RecoveryState(ServerLevel level) {
+			this.level = level;
+		}
+	}
+
+	public record RecoveryStats(
+			int checkpoints,
+			int tickets,
+			long acquisitions,
+			long releases
+	) {
+	}
+
 	private final Logger logger;
 	private final Map<TripId, TripState> trips = new LinkedHashMap<>();
 	private final Map<ChunkWindow.Key, Integer> references = new HashMap<>();
+	private final Map<TripId, RecoveryState> recovery = new LinkedHashMap<>();
+	private final Map<ChunkWindow.Key, Integer> recoveryReferences = new HashMap<>();
 
 	public ChunkTicketManager(Logger logger) {
 		this.logger = logger;
@@ -195,6 +230,93 @@ public final class ChunkTicketManager {
 			release(tripId);
 		}
 		references.clear();
+		releaseAllRecovery();
+	}
+
+	// --------------------------------------------------------------- recovery
+
+	/**
+	 * Requests the one chunk a recovery checkpoint needs. The caller must have
+	 * confirmed that the chunk already exists in level storage; this method only
+	 * makes an existing chunk readable, it never asks the generator for terrain.
+	 *
+	 * @param budget shared recovery ticket limit, {@code <= 0} disables recovery tickets
+	 * @return whether the checkpoint holds (or already held) its ticket
+	 */
+	public boolean acquireRecovery(ServerLevel level, TripId tripId, ChunkWindow.Key key, int budget) {
+		if (budget <= 0) {
+			return false;
+		}
+		RecoveryState state = recovery.get(tripId);
+		if (state != null && state.level != level) {
+			releaseRecovery(tripId);
+			state = null;
+		}
+		if (state == null) {
+			if (recoveryReferences.size() >= budget) {
+				logger.warn("Recovery checkpoint {} needs a ticket, recovery budget is {}", tripId, budget);
+				return false;
+			}
+			state = new RecoveryState(level);
+			recovery.put(tripId, state);
+		}
+		if (state.held.contains(key)) {
+			level.getChunkSource().addTicketWithRadius(RECOVERY_TICKET,
+					new ChunkPos(key.x(), key.z()), ENTITY_TICKING_RADIUS);
+			return true;
+		}
+		if (recoveryReferences.size() >= budget) {
+			logger.warn("Recovery checkpoint {} needs a ticket, recovery budget is {}", tripId, budget);
+			return false;
+		}
+		level.getChunkSource().addTicketWithRadius(RECOVERY_TICKET,
+				new ChunkPos(key.x(), key.z()), ENTITY_TICKING_RADIUS);
+		recoveryReferences.merge(key, 1, Integer::sum);
+		state.held.add(key);
+		state.acquisitions++;
+		return true;
+	}
+
+	/** Releases the recovery ticket of one checkpoint. Safe when none is held. */
+	public void releaseRecovery(TripId tripId) {
+		RecoveryState state = recovery.remove(tripId);
+		if (state == null) {
+			return;
+		}
+		for (ChunkWindow.Key key : state.held) {
+			Integer count = recoveryReferences.get(key);
+			if (count == null) {
+				continue;
+			}
+			if (count <= 1) {
+				recoveryReferences.remove(key);
+				state.level.getChunkSource().removeTicketWithRadius(RECOVERY_TICKET,
+						new ChunkPos(key.x(), key.z()), ENTITY_TICKING_RADIUS);
+			} else {
+				recoveryReferences.put(key, count - 1);
+			}
+			state.releases++;
+		}
+		state.held.clear();
+	}
+
+	public void releaseAllRecovery() {
+		for (TripId tripId : List.copyOf(recovery.keySet())) {
+			releaseRecovery(tripId);
+		}
+		recoveryReferences.clear();
+	}
+
+	public RecoveryStats recoveryStats() {
+		int tickets = 0;
+		long acquisitions = 0;
+		long releases = 0;
+		for (RecoveryState state : recovery.values()) {
+			tickets += state.held.size();
+			acquisitions += state.acquisitions;
+			releases += state.releases;
+		}
+		return new RecoveryStats(recovery.size(), tickets, acquisitions, releases);
 	}
 
 	/** Number of distinct chunks currently held by Railway across all trips. */
