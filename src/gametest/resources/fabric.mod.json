@@ -1,0 +1,19 @@
+{
+	"schemaVersion": 1,
+	"id": "railway-gametest",
+	"version": "1.0.0",
+	"name": "Railway Game Tests",
+	"environment": "*",
+	"entrypoints": {
+		"fabric-gametest": [
+			"dev.nikhcevov.railway.gametest.RailwayGameTests"
+		]
+	},
+	"depends": {
+		"railway": "*",
+		"fabricloader": ">=0.20.1",
+		"minecraft": "~26.1.2",
+		"java": ">=25",
+		"fabric-api": "*"
+	}
+}

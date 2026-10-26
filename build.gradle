@@ -45,3 +45,13 @@ java {
 tasks.named('test') {
 	useJUnitPlatform()
 }
+
+fabricApi {
+	configureTests {
+		createSourceSet = true
+		modId = "railway-gametest"
+		enableGameTests = true
+		enableClientGameTests = false
+		eula = true
+	}
+}
