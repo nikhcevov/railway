@@ -14,6 +14,7 @@ import org.junit.jupiter.api.Test;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -66,6 +67,30 @@ class RouteResourcePlannerTest {
 		common.retainAll(RouteResourcePlanner.derive(graph, fromEast, docks));
 		assertTrue(common.stream().anyMatch(key -> key.startsWith("swz|")));
 		assertTrue(common.stream().anyMatch(key -> key.startsWith("plat|")));
+	}
+
+	@Test
+	void opposingStraightTripsConflictAndReleaseCleanly() throws Exception {
+		RailGraph graph = graph(
+				fixed(0, 64, 0), fixed(1, 64, 0), fixed(2, 64, 0), fixed(3, 64, 0)
+		);
+		Set<BlockLocation> docks = Set.of(pos(0, 64, 0), pos(3, 64, 0));
+		GraphRoutePlan forward = plan(graph, pos(0, 64, 0), pos(3, 64, 0));
+		GraphRoutePlan reverse = plan(graph, pos(3, 64, 0), pos(0, 64, 0));
+		List<String> forwardResources = RouteResourcePlanner.derive(graph, forward, docks);
+		List<String> reverseResources = RouteResourcePlanner.derive(graph, reverse, docks);
+		assertEquals(new HashSet<>(forwardResources), new HashSet<>(reverseResources));
+
+		ReservationManager reservations = new ReservationManager();
+		UUID first = UUID.randomUUID();
+		UUID second = UUID.randomUUID();
+		assertTrue(reservations.tryAcquire(forwardResources, first));
+		assertEquals(forwardResources.getFirst(), forwardResources.stream()
+				.filter(resource -> !reservations.isFree(resource)).findFirst().orElseThrow());
+		assertFalse(reservations.tryAcquire(reverseResources, second));
+		assertTrue(reservations.tryAcquire(reverseResources, first));
+		reservations.releaseAll(first);
+		assertTrue(reservations.tryAcquire(reverseResources, second));
 	}
 
 	@Test
