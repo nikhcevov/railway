@@ -101,6 +101,42 @@ class ReservationManagerTest {
 	}
 
 	@Test
+	void quarantinedResourcesBlockAcquisitionUntilReconciled() {
+		ReservationManager manager = new ReservationManager();
+		UUID cart = UUID.randomUUID();
+		assertTrue(manager.tryAcquire(List.of("plat:a", "sec:a-b", "swz:x"), ALPHA));
+
+		assertEquals(3, manager.quarantineAll(ALPHA, cart, "cart removal unverified"));
+
+		assertFalse(manager.isFree("plat:a"));
+		assertFalse(manager.isFree("sec:a-b"));
+		assertTrue(manager.isQuarantined("swz:x"));
+		assertEquals(0, manager.ownedCount(ALPHA));
+		assertFalse(manager.tryAcquire(List.of("plat:a"), BETA));
+
+		manager.releaseAll(ALPHA);
+		assertTrue(manager.isQuarantined("plat:a"), "releaseAll must not clear quarantine");
+
+		assertEquals(3, manager.reconcile(cart));
+		assertTrue(manager.isFree("plat:a"));
+		assertTrue(manager.tryAcquire(List.of("plat:a"), BETA));
+	}
+
+	@Test
+	void quarantineOnlyMovesResourcesOwnedByTheFailingTrip() {
+		ReservationManager manager = new ReservationManager();
+		UUID firstCart = UUID.randomUUID();
+		assertTrue(manager.tryAcquire(List.of("plat:a", "sec:1"), ALPHA));
+		assertTrue(manager.tryAcquire(List.of("plat:b"), BETA));
+
+		assertEquals(2, manager.quarantineAll(ALPHA, firstCart, "test"));
+		assertFalse(manager.isFree("plat:b"), "another trip still owns its platform");
+		assertFalse(manager.isQuarantined("plat:b"));
+		assertEquals(1, manager.ownedCount(BETA));
+		assertFalse(manager.isFree("plat:a"));
+	}
+
+	@Test
 	void failingAcquisitionLeavesNoPartialOwnership() {
 		ReservationManager manager = new ReservationManager();
 		assertTrue(manager.tryAcquire(List.of("line:a", "line:b"), ALPHA));

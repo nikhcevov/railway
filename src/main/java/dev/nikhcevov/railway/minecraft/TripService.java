@@ -34,9 +34,11 @@ import org.slf4j.Logger;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -66,6 +68,7 @@ public final class TripService {
 		final GraphRoutePlan plan;
 		final MotionProfile profile;
 		final Map<BlockLocation, RailShapeType> requiredSwitches;
+		final double safetyMargin;
 		final long graphRevision;
 		final int maxTripTicks;
 		final long departureTick;
@@ -78,12 +81,13 @@ public final class TripService {
 		double lastZ;
 
 		ActiveTrip(Trip trip, Minecart cart, RailWorld world, GraphRoutePlan plan, MotionProfile profile,
-				long graphRevision, int maxTripTicks, long departureTick) {
+				double safetyMargin, long graphRevision, int maxTripTicks, long departureTick) {
 			this.trip = trip;
 			this.cart = cart;
 			this.world = world;
 			this.plan = plan;
 			this.profile = profile;
+			this.safetyMargin = safetyMargin;
 			this.graphRevision = graphRevision;
 			this.maxTripTicks = maxTripTicks;
 			this.departureTick = departureTick;
@@ -270,7 +274,8 @@ public final class TripService {
 					0.1
 			);
 			ActiveTrip activeTrip = new ActiveTrip(trip, cart, world, plan, profile,
-					fromGraph.revision(), config.maxTripTicks(), tick + config.boardingDelayTicks());
+					config.safetyMargin(), fromGraph.revision(), config.maxTripTicks(),
+					tick + config.boardingDelayTicks());
 			active.put(tripId, activeTrip);
 			byPlayer.put(player.getUUID(), tripId);
 			byCart.put(cart.getUUID(), tripId);
@@ -342,6 +347,7 @@ public final class TripService {
 		if (tick - lastSweepTick >= ORPHAN_SWEEP_INTERVAL) {
 			lastSweepTick = tick;
 			sweepOrphans(server);
+			reconcileQuarantine(server);
 		}
 	}
 
@@ -354,8 +360,7 @@ public final class TripService {
 
 		if (player == null) {
 			logger.info("Trip {} ended: player offline", trip.id());
-			PlayerActions.discardCart(at.cart);
-			releaseAndRemove(at);
+			discardAndRemove(at);
 			return;
 		}
 		if (cart.isRemoved()) {
@@ -372,8 +377,7 @@ public final class TripService {
 			return;
 		}
 		if (player.getVehicle() != cart) {
-			PlayerActions.discardCart(cart);
-			releaseAndRemove(at);
+			discardAndRemove(at);
 			notifyAborted(player);
 			return;
 		}
@@ -429,6 +433,11 @@ public final class TripService {
 			current = at.plan.steps().get(at.stepIndex);
 		}
 
+		Failure upcomingFailure = ensureUpcomingSwitches(at);
+		if (upcomingFailure != null) {
+			abort(at, tick, upcomingFailure);
+			return;
+		}
 		Failure currentFailure = ensureStepShape(at, current, true);
 		if (currentFailure != null) {
 			abort(at, tick, currentFailure);
@@ -482,6 +491,19 @@ public final class TripService {
 		return cartBlock.x() == step.pos().x()
 				&& cartBlock.z() == step.pos().z()
 				&& Math.abs(cartBlock.y() - step.pos().y()) <= 1;
+	}
+
+	private Failure ensureUpcomingSwitches(ActiveTrip at) {
+		int lookahead = (int) Math.ceil(at.profile.brakingDistance(at.speed) + at.safetyMargin) + 1;
+		int last = Math.min(at.plan.steps().size() - 1, at.stepIndex + lookahead);
+		for (int i = at.stepIndex; i <= last; i++) {
+			RouteStep step = at.plan.steps().get(i);
+			RailShapeType required = at.requiredSwitches.get(step.pos());
+			if (required != null && at.world.shapeAt(step.pos()) != required) {
+				return Failure.at(FailureCode.UNSUPPORTED_GEOMETRY, step.pos(), "turnout changed ahead");
+			}
+		}
+		return null;
 	}
 
 	private Failure ensureStepShape(ActiveTrip at, RouteStep step, boolean current) {
@@ -550,8 +572,7 @@ public final class TripService {
 	private void finishArrival(ActiveTrip at, ServerPlayer player, long tick) {
 		GraphRoutePlan plan = at.plan;
 		if (player.getVehicle() != at.cart) {
-			PlayerActions.discardCart(at.cart);
-			releaseAndRemove(at);
+			discardAndRemove(at);
 			notifyAborted(player);
 			return;
 		}
@@ -577,16 +598,19 @@ public final class TripService {
 		}
 
 		PlayerActions.dismountTo(player, at.world.level(), target, station == null ? 0.0F : station.exitYaw());
-		PlayerActions.discardCart(at.cart);
+		boolean removed = PlayerActions.discardCart(at.cart);
 		at.trip.transitionTo(TripPhase.COMPLETED, tick);
-		removeTrip(at);
+		if (removed) {
+			removeTrip(at);
+		} else {
+			quarantineAndRemove(at, "cart removal unverified after arrival");
+		}
 		Messages.actionBar(player, "actionbar.arrived", station == null ? plan.to().value() : station.displayName());
 	}
 
 	private void retrySafeExit(ActiveTrip at, ServerPlayer player, long tick) {
 		if (player.getVehicle() != at.cart) {
-			PlayerActions.discardCart(at.cart);
-			releaseAndRemove(at);
+			discardAndRemove(at);
 			notifyAborted(player);
 			return;
 		}
@@ -598,8 +622,8 @@ public final class TripService {
 		Optional<BlockLocation> safe = at.world.findSafeSpot(center, 3);
 		if (safe.isPresent()) {
 			PlayerActions.dismountTo(player, at.world.level(), safe.get(), exitYaw(at));
-			PlayerActions.discardCart(at.cart);
-			abortComplete(at, tick);
+			boolean removed = PlayerActions.discardCart(at.cart);
+			abortComplete(at, tick, removed);
 			notifyAborted(player);
 		} else {
 			warnPeriodically(at, player, tick, "error.exit_unsafe");
@@ -639,8 +663,8 @@ public final class TripService {
 				return;
 			}
 			PlayerActions.dismountTo(player, at.world.level(), safe.get(), exitYaw(at));
-			PlayerActions.discardCart(at.cart);
-			abortComplete(at, tick);
+			boolean removed = PlayerActions.discardCart(at.cart);
+			abortComplete(at, tick, removed);
 			if (notifyFailure) {
 				notifyTrip(trip, player, failure);
 			} else {
@@ -649,8 +673,8 @@ public final class TripService {
 			return;
 		}
 
-		PlayerActions.discardCart(at.cart);
-		abortComplete(at, tick);
+		boolean removed = PlayerActions.discardCart(at.cart);
+		abortComplete(at, tick, removed);
 		if (player != null) {
 			if (notifyFailure) {
 				notifyTrip(trip, player, failure);
@@ -660,12 +684,16 @@ public final class TripService {
 		}
 	}
 
-	private void abortComplete(ActiveTrip at, long tick) {
+	private void abortComplete(ActiveTrip at, long tick, boolean cartRemoved) {
 		if (at.trip.phase() != TripPhase.ABORTING) {
 			at.trip.transitionTo(TripPhase.ABORTING, tick);
 		}
 		at.trip.transitionTo(TripPhase.ABORTED, tick);
-		removeTrip(at);
+		if (cartRemoved) {
+			removeTrip(at);
+		} else {
+			quarantineAndRemove(at, "cart removal unverified after abort");
+		}
 	}
 
 	private void removeTrip(ActiveTrip at) {
@@ -673,6 +701,25 @@ public final class TripService {
 		byPlayer.remove(at.trip.playerUuid(), at.trip.id());
 		byCart.remove(at.cart.getUUID(), at.trip.id());
 		reservations.releaseAll(at.trip.id().value());
+		railway.state().removeTrip(at.trip.id());
+		railway.saveState();
+	}
+
+	private void discardAndRemove(ActiveTrip at) {
+		boolean removed = PlayerActions.discardCart(at.cart);
+		if (removed) {
+			releaseAndRemove(at);
+		} else {
+			quarantineAndRemove(at, "cart removal unverified");
+		}
+	}
+
+	private void quarantineAndRemove(ActiveTrip at, String reason) {
+		int count = reservations.quarantineAll(at.trip.id().value(), at.cart.getUUID(), reason);
+		logger.warn("Trip {} quarantined {} resource(s): {}", at.trip.id(), count, reason);
+		active.remove(at.trip.id());
+		byPlayer.remove(at.trip.playerUuid());
+		byCart.remove(at.cart.getUUID());
 		railway.state().removeTrip(at.trip.id());
 		railway.saveState();
 	}
@@ -724,8 +771,7 @@ public final class TripService {
 		if (at == null) {
 			return;
 		}
-		PlayerActions.discardCart(at.cart);
-		releaseAndRemove(at);
+		discardAndRemove(at);
 	}
 
 	public boolean hasActiveTrip(UUID playerUuid) {
@@ -767,6 +813,33 @@ public final class TripService {
 		byCart.clear();
 		cooldowns.clear();
 		railway.saveState();
+	}
+
+	private void reconcileQuarantine(MinecraftServer server) {
+		Set<UUID> cartIds = new LinkedHashSet<>();
+		for (var entry : reservations.quarantinedResources()) {
+			cartIds.add(entry.quarantine().cartUuid());
+		}
+		EntityTypeTest<Entity, Minecart> minecartType = EntityTypeTest.forClass(Minecart.class);
+		for (UUID cartId : cartIds) {
+			boolean present = false;
+			for (ServerLevel level : server.getAllLevels()) {
+				for (Minecart cart : level.getEntities(minecartType, RailWorld.allEntities(),
+						candidate -> candidate.getUUID().equals(cartId))) {
+					if (!cart.isRemoved()) {
+						if (!cart.isVehicle()) {
+							PlayerActions.discardCart(cart);
+						}
+						if (!cart.isRemoved()) {
+							present = true;
+						}
+					}
+				}
+			}
+			if (!present && reservations.reconcile(cartId) > 0) {
+				logger.info("Quarantine cleared for removed service cart {}", cartId);
+			}
+		}
 	}
 
 	private void sweepOrphans(MinecraftServer server) {

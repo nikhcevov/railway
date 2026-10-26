@@ -65,11 +65,13 @@ public final class PlayerActions {
 		player.setDeltaMovement(Vec3.ZERO);
 	}
 
-	public static void discardCart(Minecart cart) {
+	/** Returns whether the entity is confirmed removed after the discard call. */
+	public static boolean discardCart(Minecart cart) {
 		if (!cart.isRemoved()) {
 			cart.ejectPassengers();
 			cart.discard();
 		}
+		return cart.isRemoved();
 	}
 
 	public static String tripTag(TripId tripId) {
