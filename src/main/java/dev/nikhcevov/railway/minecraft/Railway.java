@@ -1,6 +1,7 @@
 package dev.nikhcevov.railway.minecraft;
 
 import dev.nikhcevov.railway.commands.Messages;
+import dev.nikhcevov.railway.diagnostics.DiagnosticsService;
 import dev.nikhcevov.railway.persistence.Config;
 import dev.nikhcevov.railway.persistence.JsonStateStore;
 import dev.nikhcevov.railway.persistence.StateStore;
@@ -32,6 +33,7 @@ public final class Railway {
 	private ChunkTicketManager tickets;
 	private TripService trips;
 	private RecoveryService recovery;
+	private DiagnosticsService diagnostics;
 	private SignRegistrationService signs;
 	private boolean disabled;
 	private String disabledReason;
@@ -117,6 +119,7 @@ public final class Railway {
 		if (stateLoaded) {
 			recovery.begin();
 		}
+		diagnostics = new DiagnosticsService(this);
 		if (disabled) {
 			LOGGER.error("{}", Messages.format(Messages.Lang.EN, "system.disabled", disabledReason));
 		}
@@ -167,6 +170,13 @@ public final class Railway {
 
 	public ChunkTicketManager tickets() {
 		return tickets;
+	}
+
+	public DiagnosticsService diagnostics() {
+		if (diagnostics == null) {
+			throw new IllegalStateException("Railway diagnostics are not initialized");
+		}
+		return diagnostics;
 	}
 
 	public SignRegistrationService signs() {

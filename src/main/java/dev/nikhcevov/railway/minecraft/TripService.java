@@ -1,6 +1,7 @@
 package dev.nikhcevov.railway.minecraft;
 
 import dev.nikhcevov.railway.commands.Messages;
+import dev.nikhcevov.railway.diagnostics.DiagnosticsReport;
 import dev.nikhcevov.railway.dispatch.ChunkWindow;
 import dev.nikhcevov.railway.dispatch.ReservationManager;
 import dev.nikhcevov.railway.dispatch.RouteResourcePlanner;
@@ -1016,6 +1017,33 @@ public final class TripService {
 
 	public int activeCount() {
 		return active.size();
+	}
+
+	// ------------------------------------------------------------ diagnostics
+
+	/** Read-only view of every active trip, including its ticket window state. */
+	public List<DiagnosticsReport.TripSummary> activeSummaries() {
+		List<DiagnosticsReport.TripSummary> summaries = new ArrayList<>(active.size());
+		for (ActiveTrip at : active.values()) {
+			Optional<DiagnosticsReport.TicketStats> stats = tickets.stats(at.trip.id())
+					.map(ticket -> new DiagnosticsReport.TicketStats(ticket.windowChunks(),
+							ticket.tickets(), ticket.pendingChunks(), ticket.readinessChecks()));
+			summaries.add(new DiagnosticsReport.TripSummary(at.trip.id(), at.trip.phase(),
+					at.plan.from(), at.plan.to(), at.trip.playerUuid(), at.trip.cartUuid(),
+					at.graphRevision, at.plan.componentKey(), at.plan.length(), at.plan.fromDock(),
+					at.plan.toDock(), at.trip.abortReason(), stats));
+		}
+		return List.copyOf(summaries);
+	}
+
+	/** Number of route resources currently owned by active trips. */
+	public int ownedReservationCount() {
+		return reservations.snapshot().size();
+	}
+
+	/** Read-only list of resources waiting for cart reconciliation. */
+	public List<ReservationManager.QuarantinedResource> quarantinedResources() {
+		return reservations.quarantinedResources();
 	}
 
 	// --------------------------------------------------------------- recovery

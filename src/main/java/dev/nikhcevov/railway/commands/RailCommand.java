@@ -120,6 +120,10 @@ public final class RailCommand {
 						.then(Commands.literal("abort").requires(OP2)
 								.then(Commands.argument("tripId", StringArgumentType.word()).suggests(TRIPS)
 										.executes(RailCommand::tripAbort))))
+				.then(Commands.literal("diagnostics").requires(OP2)
+						.executes(RailCommand::diagnostics)
+						.then(Commands.argument("station", StringArgumentType.word()).suggests(STATIONS)
+								.executes(RailCommand::diagnosticsStation)))
 				.then(Commands.literal("reload").requires(OP2).executes(RailCommand::reload)));
 	}
 
@@ -128,8 +132,8 @@ public final class RailCommand {
 	private static int help(CommandContext<CommandSourceStack> context) {
 		CommandSourceStack source = context.getSource();
 		for (String key : List.of("command.help.header", "command.help.station", "command.help.button",
-				"command.help.network", "command.help.route", "command.help.trip", "command.help.reload",
-				"command.help.op")) {
+				"command.help.network", "command.help.route", "command.help.trip",
+				"command.help.diagnostics", "command.help.reload", "command.help.op")) {
 			source.sendSuccess(() -> Messages.text(source, key), false);
 		}
 		return 1;
@@ -680,6 +684,42 @@ public final class RailCommand {
 			return fail(context.getSource(), Failure.detail(FailureCode.TRIP_NOT_ABORTABLE, raw));
 		}
 		return ok(context.getSource(), "trip.abort.done", raw);
+	}
+
+	// ------------------------------------------------------------ diagnostics
+
+	private static int diagnostics(CommandContext<CommandSourceStack> context) {
+		return diagnostics(context, null);
+	}
+
+	private static int diagnosticsStation(CommandContext<CommandSourceStack> context) {
+		CommandSourceStack source = context.getSource();
+		if (!Railway.isStarted()) {
+			source.sendFailure(Component.literal("Railway is not initialized"));
+			return 0;
+		}
+		String rawId = StringArgumentType.getString(context, "station");
+		if (!StationId.isValid(rawId)) {
+			return fail(source, Failure.detail(FailureCode.INVALID_ID, rawId));
+		}
+		StationId id = new StationId(rawId);
+		if (Railway.get().state().station(id).isEmpty()) {
+			return fail(source, Failure.detail(FailureCode.STATION_NOT_FOUND, rawId));
+		}
+		return diagnostics(context, id);
+	}
+
+	private static int diagnostics(CommandContext<CommandSourceStack> context, StationId focus) {
+		CommandSourceStack source = context.getSource();
+		if (!Railway.isStarted()) {
+			source.sendFailure(Component.literal("Railway is not initialized"));
+			return 0;
+		}
+		Messages.Lang lang = Messages.lang(source);
+		for (String line : Railway.get().diagnostics().render(lang, focus)) {
+			source.sendSuccess(() -> Component.literal(line), false);
+		}
+		return 1;
 	}
 
 	// ----------------------------------------------------------------- reload
