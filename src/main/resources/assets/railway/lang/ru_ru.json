@@ -84,12 +84,12 @@
   "scan.started": "Сканирование %s запущено (задание %s).",
   "scan.status.missing": "Для %s сканирования нет.",
   "scan.status.running": "Скан %s: выполняется, рельсов %s.",
-  "scan.status.complete": "Скан %s: завершён, рельсов %s, revision %s.",
+  "scan.status.complete": "Скан %s: завершён, рельсов %s, стрелок %s, revision %s.",
   "scan.status.failed": "Скан %s: ошибка: %s",
   "scan.limit": "Скан %s упёрся в лимит.",
   "scan.running_refuse": "Сканирование %s ещё выполняется.",
 
-  "route.ok": "Маршрут %s -> %s: %s блоков, рельсов %s, компонент %s.",
+  "route.ok": "Маршрут %s -> %s: %s блоков, рельсов %s, стрелок %s, компонент %s.",
   "route.component": "Компонент маршрута: %s",
 
   "trip.list.empty": "Активных поездок нет.",

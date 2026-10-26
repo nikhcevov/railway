@@ -84,12 +84,12 @@
   "scan.started": "Scan %s started (job %s).",
   "scan.status.missing": "No scan for %s.",
   "scan.status.running": "Scan %s: running, %s rails.",
-  "scan.status.complete": "Scan %s: complete, %s rails, revision %s.",
+  "scan.status.complete": "Scan %s: complete, %s rails, %s switches, revision %s.",
   "scan.status.failed": "Scan %s: failed: %s",
   "scan.limit": "Scan %s hit a limit.",
   "scan.running_refuse": "Scan %s is still running.",
 
-  "route.ok": "Route %s -> %s: %s blocks, %s rails, component %s.",
+  "route.ok": "Route %s -> %s: %s blocks, %s rails, %s switches, component %s.",
   "route.component": "Route component: %s",
 
   "trip.list.empty": "No active trips.",

@@ -287,7 +287,7 @@ public final class RailwayGameTests implements CustomTestMethodInvoker {
 		for (int i = 0; i < 32 && scans.isRunning(station.id()); i++) {
 			scans.tick(server);
 		}
-		if (scans.line(station.id()) == null) {
+		if (scans.graph(station.id()) == null) {
 			helper.fail("scan failed for " + station.id() + ": " + scans.failure(station.id()));
 		}
 	}

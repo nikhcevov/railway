@@ -8,13 +8,13 @@ public final class Trip {
 	private final TripId id;
 	private final UUID playerUuid;
 	private final UUID cartUuid;
-	private final RoutePlan plan;
+	private final TripPlan plan;
 	private final long startedTick;
 	private TripPhase phase;
 	private long phaseSinceTick;
 	private String abortReason;
 
-	public Trip(TripId id, UUID playerUuid, UUID cartUuid, RoutePlan plan, long startedTick) {
+	public Trip(TripId id, UUID playerUuid, UUID cartUuid, TripPlan plan, long startedTick) {
 		this.id = Objects.requireNonNull(id, "id");
 		this.playerUuid = Objects.requireNonNull(playerUuid, "playerUuid");
 		this.cartUuid = Objects.requireNonNull(cartUuid, "cartUuid");
@@ -36,7 +36,7 @@ public final class Trip {
 		return cartUuid;
 	}
 
-	public RoutePlan plan() {
+	public TripPlan plan() {
 		return plan;
 	}
 

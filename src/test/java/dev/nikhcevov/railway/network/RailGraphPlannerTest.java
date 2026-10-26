@@ -3,6 +3,7 @@ package dev.nikhcevov.railway.network;
 import dev.nikhcevov.railway.domain.BlockLocation;
 import dev.nikhcevov.railway.domain.Failure;
 import dev.nikhcevov.railway.domain.FailureCode;
+import dev.nikhcevov.railway.domain.StationId;
 
 import org.junit.jupiter.api.Test;
 
@@ -246,13 +247,13 @@ class RailGraphPlannerTest {
 
 	private static GraphRoutePlan planned(RailGraph graph, BlockLocation from, BlockLocation to, int max)
 			throws Exception {
-		RailGraphPlanner.Result result = RailGraphPlanner.plan(graph, from, to, max);
+		RailGraphPlanner.Result result = RailGraphPlanner.plan(graph, new StationId("alpha"), new StationId("beta"), from, to, max);
 		assertTrue(result instanceof RailGraphPlanner.Result.Planned, "expected plan but got " + result);
 		return ((RailGraphPlanner.Result.Planned) result).plan();
 	}
 
 	private static Failure rejected(RailGraph graph, BlockLocation from, BlockLocation to, int max) {
-		RailGraphPlanner.Result result = RailGraphPlanner.plan(graph, from, to, max);
+		RailGraphPlanner.Result result = RailGraphPlanner.plan(graph, new StationId("alpha"), new StationId("beta"), from, to, max);
 		assertTrue(result instanceof RailGraphPlanner.Result.Rejected, "expected rejection but got " + result);
 		return ((RailGraphPlanner.Result.Rejected) result).failure();
 	}

@@ -5,8 +5,8 @@ import dev.nikhcevov.railway.domain.Failure;
 import dev.nikhcevov.railway.domain.FailureCode;
 import dev.nikhcevov.railway.domain.Station;
 import dev.nikhcevov.railway.domain.StationId;
-import dev.nikhcevov.railway.network.LineScan;
-import dev.nikhcevov.railway.network.StraightLineScanner;
+import dev.nikhcevov.railway.network.GraphScanner;
+import dev.nikhcevov.railway.network.RailGraph;
 import dev.nikhcevov.railway.persistence.Config;
 
 import net.minecraft.server.MinecraftServer;
@@ -20,24 +20,24 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
-/** Tick-batched scan jobs. Completed lines are derived caches and are never persisted. */
+/** Tick-batched graph scan jobs. Graphs are derived caches and are never persisted. */
 public final class ScanService {
-	public record Status(String jobId, StationId station, int rails, boolean running, boolean complete,
-			Failure failure, LineScan line, long startedTick, long revision) {
+	public record Status(String jobId, StationId station, int rails, int switches, boolean running, boolean complete,
+			Failure failure, RailGraph graph, long startedTick, long revision) {
 	}
 
 	private static final class Job {
 		final String id;
 		final StationId station;
-		final StraightLineScanner scanner;
+		final GraphScanner scanner;
 		final int railsPerTick;
 		final long budgetNanos;
 		final long startedTick;
 		final long revision;
-		LineScan line;
+		RailGraph graph;
 		Failure failure;
 
-		Job(String id, StationId station, StraightLineScanner scanner, int railsPerTick, long budgetNanos,
+		Job(String id, StationId station, GraphScanner scanner, int railsPerTick, long budgetNanos,
 				long startedTick, long revision) {
 			this.id = id;
 			this.station = station;
@@ -71,11 +71,12 @@ public final class ScanService {
 			return new StartResult.Rejected(Failure.detail(FailureCode.SCAN_RUNNING, station.id().value()));
 		}
 		String jobId = "scan-" + nextJobId++;
-		StraightLineScanner scanner = new StraightLineScanner(
+		GraphScanner scanner = new GraphScanner(
 				station.dimension(),
 				station.dock(),
 				new RailWorld(level),
-				config.maxRailsPerScan()
+				config.maxRailsPerScan(),
+				revision
 		);
 		Job job = new Job(jobId, station.id(), scanner, config.scanRailsPerTick(),
 				Math.max(1, config.scanTimeBudgetMs()) * 1_000_000L, tick, revision);
@@ -96,8 +97,9 @@ public final class ScanService {
 					logger.warn("Scan {} for station {} failed: {} at {}", job.id, job.station,
 							job.failure.code(), job.failure.location() == null ? "-" : job.failure.location().shortString());
 				} else {
-					job.line = job.scanner.result();
-					logger.info("Scan {} for station {} complete: {} rails", job.id, job.station, job.line.size());
+					job.graph = job.scanner.graph();
+					logger.info("Scan {} for station {} complete: {} rails, {} switches",
+							job.id, job.station, job.graph.rails().size(), job.graph.switches().size());
 				}
 			}
 		}
@@ -108,8 +110,10 @@ public final class ScanService {
 		if (job == null) {
 			return Optional.empty();
 		}
-		return Optional.of(new Status(job.id, job.station, job.scanner.railCount(), !job.scanner.isFinished(),
-				job.line != null, job.failure, job.line, job.startedTick, job.revision));
+		RailGraph graph = job.graph;
+		return Optional.of(new Status(job.id, job.station, job.scanner.railCount(),
+				graph == null ? 0 : graph.switches().size(), !job.scanner.isFinished(), graph != null,
+				job.failure, graph, job.startedTick, job.revision));
 	}
 
 	public List<Status> all() {
@@ -120,9 +124,9 @@ public final class ScanService {
 		return result;
 	}
 
-	public LineScan line(StationId station) {
+	public RailGraph graph(StationId station) {
 		Job job = jobs.get(station);
-		return job == null ? null : job.line;
+		return job == null ? null : job.graph;
 	}
 
 	public Failure failure(StationId station) {
@@ -140,11 +144,9 @@ public final class ScanService {
 	}
 
 	public void invalidate(BlockLocation location) {
-		// A block change invalidates every completed line that contains it. Lines are
-		// cheap derived caches; route dispatch revalidates the full route anyway.
 		List<StationId> affected = new ArrayList<>();
 		for (Job job : jobs.values()) {
-			if (job.line != null && job.line.contains(location)) {
+			if (job.graph != null && job.graph.rail(location) != null) {
 				affected.add(job.station);
 			}
 		}

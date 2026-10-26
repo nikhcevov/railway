@@ -3,6 +3,7 @@ package dev.nikhcevov.railway.network;
 import dev.nikhcevov.railway.domain.BlockLocation;
 import dev.nikhcevov.railway.domain.Failure;
 import dev.nikhcevov.railway.domain.FailureCode;
+import dev.nikhcevov.railway.domain.StationId;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -43,7 +44,8 @@ public final class RailGraphPlanner {
 	private RailGraphPlanner() {
 	}
 
-	public static Result plan(RailGraph graph, BlockLocation fromDock, BlockLocation toDock, int maxRouteLength) {
+	public static Result plan(RailGraph graph, StationId fromStation, StationId toStation,
+			BlockLocation fromDock, BlockLocation toDock, int maxRouteLength) {
 		GraphRail from = graph.rail(fromDock);
 		if (from == null) {
 			return new Result.Rejected(Failure.at(FailureCode.DOCK_NOT_ON_LINE, fromDock));
@@ -153,6 +155,8 @@ public final class RailGraphPlanner {
 		required.forEach((pos, shape) -> switches.add(new SwitchRequirement(pos, shape)));
 
 		GraphRoutePlan plan = new GraphRoutePlan(
+				fromStation,
+				toStation,
 				fromDock,
 				toDock,
 				graph.dimension(),

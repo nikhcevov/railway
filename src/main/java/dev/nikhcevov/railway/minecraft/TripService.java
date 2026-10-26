@@ -6,21 +6,19 @@ import dev.nikhcevov.railway.domain.Binding;
 import dev.nikhcevov.railway.domain.BlockLocation;
 import dev.nikhcevov.railway.domain.Failure;
 import dev.nikhcevov.railway.domain.FailureCode;
-import dev.nikhcevov.railway.domain.RailAxis;
-import dev.nikhcevov.railway.domain.RoutePlan;
 import dev.nikhcevov.railway.domain.Station;
 import dev.nikhcevov.railway.domain.StationId;
 import dev.nikhcevov.railway.domain.Trip;
 import dev.nikhcevov.railway.domain.TripId;
 import dev.nikhcevov.railway.domain.TripPhase;
 import dev.nikhcevov.railway.motion.MotionProfile;
-import dev.nikhcevov.railway.network.LineScan;
-import dev.nikhcevov.railway.network.RailKind;
-import dev.nikhcevov.railway.network.RailProbe;
-import dev.nikhcevov.railway.network.RoutePlanner;
+import dev.nikhcevov.railway.network.GraphRoutePlan;
+import dev.nikhcevov.railway.network.RailGraph;
+import dev.nikhcevov.railway.network.RailGraphPlanner;
+import dev.nikhcevov.railway.network.RailShapeType;
+import dev.nikhcevov.railway.network.RouteStep;
 import dev.nikhcevov.railway.persistence.Config;
 import dev.nikhcevov.railway.persistence.TripRecord;
-import dev.nikhcevov.railway.persistence.WorldState;
 
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
@@ -41,13 +39,14 @@ import java.util.Optional;
 import java.util.UUID;
 
 /**
- * Launch, motion control, arrival, abort and restart recovery. All state is touched
- * on the server thread; the vanilla minecart remains the moving entity.
+ * Launch, graph route following, turnout control, arrival, abort and restart
+ * recovery. All state is touched on the server thread.
  */
 public final class TripService {
 	private static final double STOP_DISTANCE = 0.25;
 	private static final double STOP_SPEED = 1.0;
 	private static final double FINAL_SPEED = 0.1;
+	private static final double TURN_SPEED_LIMIT = 4.0;
 	private static final long ORPHAN_SWEEP_INTERVAL = 100;
 	private static final long WARNING_INTERVAL = 100;
 
@@ -63,27 +62,32 @@ public final class TripService {
 		final Trip trip;
 		final Minecart cart;
 		final RailWorld world;
+		final GraphRoutePlan plan;
 		final MotionProfile profile;
-		final double safetyMargin;
+		final Map<BlockLocation, RailShapeType> requiredSwitches;
 		final int maxTripTicks;
 		final long departureTick;
 		double speed;
+		int stepIndex;
 		long lastWarningTick;
 		long lastSafeRetryTick;
 		long lastProgressTick;
 		double lastX;
 		double lastZ;
-		boolean pathWarningSent;
 
-		ActiveTrip(Trip trip, Minecart cart, RailWorld world, MotionProfile profile, double safetyMargin,
+		ActiveTrip(Trip trip, Minecart cart, RailWorld world, GraphRoutePlan plan, MotionProfile profile,
 				int maxTripTicks, long departureTick) {
 			this.trip = trip;
 			this.cart = cart;
 			this.world = world;
+			this.plan = plan;
 			this.profile = profile;
-			this.safetyMargin = safetyMargin;
 			this.maxTripTicks = maxTripTicks;
 			this.departureTick = departureTick;
+			this.requiredSwitches = new HashMap<>();
+			for (var requirement : plan.switches()) {
+				requiredSwitches.put(requirement.pos(), requirement.requiredShape());
+			}
 			this.lastProgressTick = trip.startedTick();
 			this.lastX = cart.getX();
 			this.lastZ = cart.getZ();
@@ -120,7 +124,6 @@ public final class TripService {
 		MinecraftServer server = railway.server();
 		long tick = server.getTickCount();
 		Config config = railway.config();
-		WorldState state = railway.state();
 
 		if (railway.disabled()) {
 			return reject(FailureCode.DISABLED, railway.disabledReason());
@@ -141,8 +144,8 @@ public final class TripService {
 			return reject(FailureCode.TRIP_LIMIT, Integer.toString(config.maxActiveTrips()));
 		}
 
-		Optional<Station> fromOpt = state.station(binding.fromStationId());
-		Optional<Station> toOpt = state.station(binding.toStationId());
+		Optional<Station> fromOpt = railway.state().station(binding.fromStationId());
+		Optional<Station> toOpt = railway.state().station(binding.toStationId());
 		if (fromOpt.isEmpty()) {
 			return reject(FailureCode.STATION_NOT_FOUND, binding.fromStationId().value());
 		}
@@ -177,40 +180,36 @@ public final class TripService {
 			return reject(FailureCode.PLAYER_TOO_FAR, Integer.toString(config.boardingRadius()));
 		}
 
-		LineScan fromLine = railway.scans().line(from.id());
-		if (fromLine == null) {
-			if (railway.scans().isRunning(from.id())) {
-				return reject(FailureCode.SCAN_RUNNING, from.id().value());
-			}
-			Failure scanFailure = railway.scans().failure(from.id());
-			return reject(scanFailure != null ? scanFailure
-					: Failure.detail(FailureCode.SCAN_INCOMPLETE, from.id().value()));
+		GraphLookup fromLookup = graphOrFailure(from);
+		if (fromLookup instanceof GraphLookup.Failed failed) {
+			return reject(failed.failure());
 		}
-		LineScan toLine = railway.scans().line(to.id());
-		if (toLine == null) {
-			if (railway.scans().isRunning(to.id())) {
-				return reject(FailureCode.SCAN_RUNNING, to.id().value());
-			}
-			Failure scanFailure = railway.scans().failure(to.id());
-			return reject(scanFailure != null ? scanFailure
-					: Failure.detail(FailureCode.SCAN_INCOMPLETE, to.id().value()));
+		GraphLookup toLookup = graphOrFailure(to);
+		if (toLookup instanceof GraphLookup.Failed failed) {
+			return reject(failed.failure());
+		}
+		RailGraph fromGraph = ((GraphLookup.Found) fromLookup).graph();
+		RailGraph toGraph = ((GraphLookup.Found) toLookup).graph();
+		if (!fromGraph.componentKey().equals(toGraph.componentKey())) {
+			return reject(Failure.of(FailureCode.NO_PATH));
 		}
 
-		RoutePlanner.Result planned = RoutePlanner.plan(from, to, fromLine, toLine, config.maxRouteLength());
-		if (planned instanceof RoutePlanner.Result.Rejected rejected) {
+		RailGraphPlanner.Result planned = RailGraphPlanner.plan(fromGraph, from.id(), to.id(),
+				from.dock(), to.dock(), config.maxRouteLength());
+		if (planned instanceof RailGraphPlanner.Result.Rejected rejected) {
 			return reject(rejected.failure());
 		}
-		RoutePlan plan = ((RoutePlanner.Result.Planned) planned).plan();
+		GraphRoutePlan plan = ((RailGraphPlanner.Result.Planned) planned).plan();
 
-		Failure routeFailure = world.validateRoute(plan);
+		Failure routeFailure = world.validateGraphRoute(plan);
 		if (routeFailure != null) {
 			return reject(routeFailure);
 		}
 		if (!world.isDockFree(plan.fromDock(), player.getUUID())) {
 			return reject(FailureCode.DOCK_OCCUPIED, from.id().value());
 		}
-		if (!world.isSafeStand(plan.exit())) {
-			return reject(Failure.at(FailureCode.EXIT_UNSAFE, plan.exit()));
+		if (!world.isSafeStand(to.exit())) {
+			return reject(Failure.at(FailureCode.EXIT_UNSAFE, to.exit()));
 		}
 		if (world.isPathOccupied(plan, player.getUUID(), new UUID(0L, 0L))) {
 			return reject(FailureCode.PATH_OCCUPIED, null);
@@ -219,6 +218,11 @@ public final class TripService {
 		TripId tripId = TripId.random();
 		if (!reservations.tryAcquire(List.of(plan.componentKey()), tripId.value())) {
 			return reject(FailureCode.RESERVATION_CONFLICT, plan.componentKey());
+		}
+		Failure switchFailure = world.prepareSwitches(plan);
+		if (switchFailure != null) {
+			reservations.release(plan.componentKey(), tripId.value());
+			return reject(switchFailure);
 		}
 
 		Minecart cart = null;
@@ -242,13 +246,13 @@ public final class TripService {
 					config.braking(),
 					0.1
 			);
-			ActiveTrip activeTrip = new ActiveTrip(trip, cart, world, profile, config.safetyMargin(),
+			ActiveTrip activeTrip = new ActiveTrip(trip, cart, world, plan, profile,
 					config.maxTripTicks(), tick + config.boardingDelayTicks());
 			active.put(tripId, activeTrip);
 			byPlayer.put(player.getUUID(), tripId);
 			byCart.put(cart.getUUID(), tripId);
 			cooldowns.put(player.getUUID(), tick);
-			state.addTrip(new TripRecord(tripId, player.getUUID(), cart.getUUID(),
+			railway.state().addTrip(new TripRecord(tripId, player.getUUID(), cart.getUUID(),
 					plan.from(), plan.to(), TripPhase.BOARDING, tick));
 			railway.saveState();
 			Messages.actionBar(player, "actionbar.boarding");
@@ -261,6 +265,27 @@ public final class TripService {
 			reservations.release(plan.componentKey(), tripId.value());
 			return reject(FailureCode.INTERNAL, e.getMessage());
 		}
+	}
+
+	private sealed interface GraphLookup {
+		record Found(RailGraph graph) implements GraphLookup {
+		}
+
+		record Failed(Failure failure) implements GraphLookup {
+		}
+	}
+
+	private GraphLookup graphOrFailure(Station station) {
+		RailGraph graph = railway.scans().graph(station.id());
+		if (graph != null) {
+			return new GraphLookup.Found(graph);
+		}
+		if (railway.scans().isRunning(station.id())) {
+			return new GraphLookup.Failed(Failure.detail(FailureCode.SCAN_RUNNING, station.id().value()));
+		}
+		Failure scanFailure = railway.scans().failure(station.id());
+		return new GraphLookup.Failed(scanFailure != null ? scanFailure
+				: Failure.detail(FailureCode.SCAN_INCOMPLETE, station.id().value()));
 	}
 
 	private StartResult reject(FailureCode code, String detail) {
@@ -323,8 +348,6 @@ public final class TripService {
 			return;
 		}
 		if (player.getVehicle() != cart) {
-			// Vanilla dismount (Shift) or an external ejection: keep the player where
-			// vanilla put them, remove the now-empty service cart and free resources.
 			PlayerActions.discardCart(cart);
 			releaseAndRemove(at);
 			notifyAborted(player);
@@ -340,17 +363,21 @@ public final class TripService {
 			case BOARDING -> {
 				cart.setDeltaMovement(Vec3.ZERO);
 				if (tick >= at.departureTick) {
-					Failure ready = at.world.validateRoute(trip.plan());
+					Failure ready = at.world.validateGraphRoute(at.plan);
+					if (ready == null) {
+						ready = at.world.prepareSwitches(at.plan);
+					}
 					if (ready != null) {
 						abort(at, tick, ready);
 						return;
 					}
 					trip.transitionTo(TripPhase.RUNNING, tick);
-					Station to = railway.state().station(trip.plan().to()).orElse(null);
-					Messages.actionBar(player, "actionbar.departing", to == null ? trip.plan().to().value() : to.displayName());
+					Station to = railway.state().station(at.plan.to()).orElse(null);
+					Messages.actionBar(player, "actionbar.departing",
+							to == null ? at.plan.to().value() : to.displayName());
 				}
 			}
-			case RUNNING -> tickRunning(at, player, tick);
+			case RUNNING -> tickGraph(at, player, tick);
 			case ARRIVING -> finishArrival(at, player, tick);
 			case ABORTING -> retrySafeExit(at, player, tick);
 			case PREPARING, COMPLETED, ABORTED, RECOVERING -> {
@@ -358,131 +385,157 @@ public final class TripService {
 		}
 	}
 
-	private void tickRunning(ActiveTrip at, ServerPlayer player, long tick) {
-		Trip trip = at.trip;
+	private void tickGraph(ActiveTrip at, ServerPlayer player, long tick) {
 		Minecart cart = at.cart;
-		RailProbe under = at.world.probe(RailWorld.loc(cart.blockPosition()));
-		if (!(under instanceof RailProbe.Rail rail) || !rail.info().straight() || rail.info().slope()
-				|| rail.info().axis() != trip.plan().axis()) {
-			abort(at, tick, Failure.at(FailureCode.SCAN_INCOMPLETE, RailWorld.loc(cart.blockPosition())));
+		RouteStep current = at.plan.steps().get(at.stepIndex);
+		BlockLocation cartBlock = RailWorld.loc(cart.blockPosition());
+		if (!matchesStep(cartBlock, cart, current)) {
+			int found = -1;
+			for (int i = at.stepIndex + 1; i < at.plan.steps().size() && i <= at.stepIndex + 3; i++) {
+				if (matchesStep(cartBlock, cart, at.plan.steps().get(i))) {
+					found = i;
+					break;
+				}
+			}
+			if (found < 0) {
+				abort(at, tick, Failure.at(FailureCode.INTERNAL, cartBlock, "cart left planned route"));
+				return;
+			}
+			at.stepIndex = found;
+			current = at.plan.steps().get(at.stepIndex);
+		}
+
+		Failure currentFailure = ensureStepShape(at, current, true);
+		if (currentFailure != null) {
+			abort(at, tick, currentFailure);
 			return;
 		}
+		RouteStep next = at.stepIndex + 1 < at.plan.steps().size()
+				? at.plan.steps().get(at.stepIndex + 1) : null;
+		if (next != null) {
+			Failure nextFailure = ensureStepShape(at, next, false);
+			if (nextFailure != null) {
+				abort(at, tick, nextFailure);
+				return;
+			}
+		}
+
 		double moved = Math.abs(cart.getX() - at.lastX) + Math.abs(cart.getZ() - at.lastZ);
 		if (moved > 0.005) {
 			at.lastProgressTick = tick;
 			at.lastX = cart.getX();
 			at.lastZ = cart.getZ();
 		}
-		double remaining = remaining(at);
+		double remaining = remaining(at, cart);
 		if (tick - at.lastProgressTick > 40 && remaining > STOP_DISTANCE) {
 			abort(at, tick, Failure.detail(FailureCode.INTERNAL, "cart made no progress"));
 			return;
 		}
-		if (remaining < -0.3) {
-			abort(at, tick, Failure.detail(FailureCode.INTERNAL, "passed destination dock"));
-			return;
-		}
 
-		if (remaining <= STOP_DISTANCE && at.speed <= STOP_SPEED) {
-			stopAtDock(at);
-			trip.transitionTo(TripPhase.ARRIVING, tick);
-			finishArrival(at, player, tick);
-			return;
-		}
-
-		int lookahead = Math.max(2, Math.min(32,
-				(int) Math.ceil(at.profile.brakingDistance(at.speed) + at.safetyMargin)));
-		AheadCheck ahead = checkAhead(at, lookahead);
-		double target;
-		if (ahead.failure() != null) {
-			if (!at.pathWarningSent) {
-				at.pathWarningSent = true;
-				Messages.actionBar(player, "actionbar.path_changed");
-			}
-			target = Math.min(at.profile.targetSpeed(remaining), at.profile.targetSpeed(Math.max(0, ahead.distance() - 0.5)));
-			if (ahead.distance() <= 0.5 || at.speed <= FINAL_SPEED) {
-				abort(at, tick, ahead.failure());
+		if (at.stepIndex == at.plan.steps().size() - 1) {
+			if (remaining < -0.3) {
+				abort(at, tick, Failure.detail(FailureCode.INTERNAL, "passed destination dock"));
 				return;
 			}
-		} else if (at.world.isPathBlockedAhead(trip.plan(), currentCoordinate(at),
-				at.profile.brakingDistance(at.speed) + at.safetyMargin, cart.getUUID(), player.getUUID())) {
-			target = 0;
-			if (at.speed < FINAL_SPEED) {
-				abort(at, tick, Failure.detail(FailureCode.PATH_OCCUPIED, null));
+			if (remaining <= STOP_DISTANCE && at.speed <= STOP_SPEED) {
+				stopAtDock(at);
+				at.trip.transitionTo(TripPhase.ARRIVING, tick);
+				finishArrival(at, player, tick);
 				return;
 			}
-		} else {
-			target = at.profile.targetSpeed(remaining);
 		}
 
+		double limit = speedLimit(at, current);
+		if (next != null) {
+			limit = Math.min(limit, speedLimit(at, next));
+		}
+		double target = Math.min(at.profile.targetSpeed(remaining), limit);
 		at.speed = at.profile.step(at.speed, target);
-		applyVelocity(at);
+		applyVelocity(at, cart, current, next);
 	}
 
-	private record AheadCheck(Failure failure, double distance) {
+	private boolean matchesStep(BlockLocation cartBlock, Minecart cart, RouteStep step) {
+		return cartBlock.x() == step.pos().x()
+				&& cartBlock.z() == step.pos().z()
+				&& Math.abs(cartBlock.y() - step.pos().y()) <= 1;
 	}
 
-	/** Looks for a broken or unsupported rail within the stop distance. */
-	private AheadCheck checkAhead(ActiveTrip at, int lookahead) {
-		RoutePlan plan = at.trip.plan();
-		double current = currentCoordinate(at);
-		int currentBlock = (int) Math.floor(current);
-		int targetBlock = plan.axis() == RailAxis.X ? plan.toDock().x() : plan.toDock().z();
-		int sign = plan.departureSign();
-		for (int block = 1; block <= lookahead; block++) {
-			int coord = currentBlock + sign * block;
-			if ((coord - targetBlock) * sign > 0) {
-				break;
-			}
-			BlockLocation location = plan.axis() == RailAxis.X
-					? new BlockLocation(coord, plan.fromDock().y(), plan.fromDock().z())
-					: new BlockLocation(plan.fromDock().x(), plan.fromDock().y(), coord);
-			RailProbe probe = at.world.probe(location);
-			boolean broken = !(probe instanceof RailProbe.Rail rail)
-					|| !rail.info().straight()
-					|| rail.info().slope()
-					|| rail.info().axis() != plan.axis()
-					|| rail.info().kind() == RailKind.DETECTOR
-					|| rail.info().kind() == RailKind.ACTIVATOR;
-			if (broken) {
-				double distance = Math.abs(coord + 0.5 - current);
-				return new AheadCheck(Failure.at(FailureCode.SCAN_INCOMPLETE, location), distance);
-			}
+	private Failure ensureStepShape(ActiveTrip at, RouteStep step, boolean current) {
+		RailShapeType required = at.requiredSwitches.getOrDefault(step.pos(), step.shape());
+		RailShapeType actual = at.world.shapeAt(step.pos());
+		if (actual == required) {
+			return null;
 		}
-		return new AheadCheck(null, Double.MAX_VALUE);
+		// Turnouts are set before departure. Any later change is external and must
+		// stop the trip at the conflict zone rather than being silently rewritten.
+		return Failure.at(FailureCode.UNSUPPORTED_GEOMETRY, step.pos(), "rail shape changed");
 	}
 
-	private void applyVelocity(ActiveTrip at) {
-		RoutePlan plan = at.trip.plan();
-		double perTick = at.speed * MotionProfile.TICK_SECONDS;
-		int sign = plan.departureSign();
-		if (plan.axis() == RailAxis.X) {
-			at.cart.setDeltaMovement(sign * perTick, 0.0, 0.0);
+	private double speedLimit(ActiveTrip at, RouteStep step) {
+		if (step.shape().isStraightHorizontal()) {
+			return at.profile.maxSpeed();
+		}
+		return Math.min(at.profile.maxSpeed(), TURN_SPEED_LIMIT);
+	}
+
+	private void applyVelocity(ActiveTrip at, Minecart cart, RouteStep current, RouteStep next) {
+		double targetX;
+		double targetZ;
+		if (next != null) {
+			targetX = next.pos().x() + 0.5;
+			targetZ = next.pos().z() + 0.5;
 		} else {
-			at.cart.setDeltaMovement(0.0, 0.0, sign * perTick);
+			targetX = at.plan.toDock().x() + 0.5;
+			targetZ = at.plan.toDock().z() + 0.5;
 		}
+		double dx = targetX - cart.getX();
+		double dz = targetZ - cart.getZ();
+		double length = Math.hypot(dx, dz);
+		double perTick = at.speed * MotionProfile.TICK_SECONDS;
+		if (length < 1.0E-4) {
+			cart.setDeltaMovement(Vec3.ZERO);
+			return;
+		}
+		cart.setDeltaMovement(dx / length * perTick, 0.0, dz / length * perTick);
+	}
+
+	private double remaining(ActiveTrip at, Minecart cart) {
+		int last = at.plan.steps().size() - 1;
+		if (at.stepIndex >= last) {
+			return horizontalDistance(cart.getX(), cart.getZ(), at.plan.toDock().x() + 0.5,
+					at.plan.toDock().z() + 0.5);
+		}
+		RouteStep next = at.plan.steps().get(at.stepIndex + 1);
+		double distanceToNext = horizontalDistance(cart.getX(), cart.getZ(),
+				next.pos().x() + 0.5, next.pos().z() + 0.5);
+		double transitions = last - at.stepIndex;
+		double covered = 1.0 - Math.min(1.0, distanceToNext);
+		return Math.max(0.0, transitions - covered);
+	}
+
+	private static double horizontalDistance(double x1, double z1, double x2, double z2) {
+		return Math.hypot(x2 - x1, z2 - z1);
 	}
 
 	private void stopAtDock(ActiveTrip at) {
-		RoutePlan plan = at.trip.plan();
 		at.cart.setDeltaMovement(Vec3.ZERO);
 		at.speed = 0;
-		if (plan.axis() == RailAxis.X) {
-			at.cart.setPos(plan.toDock().x() + 0.5, at.cart.getY(), at.cart.getZ());
-		} else {
-			at.cart.setPos(at.cart.getX(), at.cart.getY(), plan.toDock().z() + 0.5);
-		}
+		at.cart.setPos(at.plan.toDock().x() + 0.5, at.cart.getY(), at.plan.toDock().z() + 0.5);
 	}
 
 	private void finishArrival(ActiveTrip at, ServerPlayer player, long tick) {
-		RoutePlan plan = at.trip.plan();
+		GraphRoutePlan plan = at.plan;
 		if (player.getVehicle() != at.cart) {
 			PlayerActions.discardCart(at.cart);
 			releaseAndRemove(at);
 			notifyAborted(player);
 			return;
 		}
-		BlockLocation exit = plan.exit();
+		BlockLocation exit = plan.steps().getLast().pos().offset(0, 0, 0);
+		Station station = railway.state().station(plan.to()).orElse(null);
+		if (station != null && station.hasExit()) {
+			exit = station.exit();
+		}
 		BlockLocation target;
 		if (at.world.isSafeStand(exit)) {
 			target = exit;
@@ -499,11 +552,10 @@ public final class TripService {
 			}
 		}
 
-		PlayerActions.dismountTo(player, at.world.level(), target, plan.exitYaw());
+		PlayerActions.dismountTo(player, at.world.level(), target, station == null ? 0.0F : station.exitYaw());
 		PlayerActions.discardCart(at.cart);
 		at.trip.transitionTo(TripPhase.COMPLETED, tick);
 		removeTrip(at);
-		Station station = railway.state().station(plan.to()).orElse(null);
 		Messages.actionBar(player, "actionbar.arrived", station == null ? plan.to().value() : station.displayName());
 	}
 
@@ -521,7 +573,7 @@ public final class TripService {
 		BlockLocation center = RailWorld.loc(at.cart.blockPosition());
 		Optional<BlockLocation> safe = at.world.findSafeSpot(center, 3);
 		if (safe.isPresent()) {
-			PlayerActions.dismountTo(player, at.world.level(), safe.get(), at.trip.plan().exitYaw());
+			PlayerActions.dismountTo(player, at.world.level(), safe.get(), exitYaw(at));
 			PlayerActions.discardCart(at.cart);
 			abortComplete(at, tick);
 			notifyAborted(player);
@@ -562,7 +614,7 @@ public final class TripService {
 				warnPeriodically(at, player, tick, "error.exit_unsafe");
 				return;
 			}
-			PlayerActions.dismountTo(player, at.world.level(), safe.get(), at.trip.plan().exitYaw());
+			PlayerActions.dismountTo(player, at.world.level(), safe.get(), exitYaw(at));
 			PlayerActions.discardCart(at.cart);
 			abortComplete(at, tick);
 			if (notifyFailure) {
@@ -601,7 +653,6 @@ public final class TripService {
 		railway.saveState();
 	}
 
-	/** Releases runtime state without inventing a safe exit; used when the player is gone. */
 	private void releaseAndRemove(ActiveTrip at) {
 		active.remove(at.trip.id());
 		byPlayer.remove(at.trip.playerUuid());
@@ -611,6 +662,11 @@ public final class TripService {
 		railway.saveState();
 	}
 
+	private float exitYaw(ActiveTrip at) {
+		Station to = railway.state().station(at.plan.to()).orElse(null);
+		return to == null ? 0.0F : to.exitYaw();
+	}
+
 	private void notifyTrip(Trip trip, ServerPlayer player, Failure failure) {
 		player.sendSystemMessage(Messages.failure(player, failure));
 		Messages.actionBar(player, "actionbar.aborted");
@@ -618,18 +674,6 @@ public final class TripService {
 
 	private void notifyAborted(ServerPlayer player) {
 		Messages.actionBar(player, "actionbar.aborted");
-	}
-
-	private double remaining(ActiveTrip at) {
-		RoutePlan plan = at.trip.plan();
-		double target = plan.axis() == RailAxis.X ? plan.toDock().x() + 0.5 : plan.toDock().z() + 0.5;
-		double current = currentCoordinate(at);
-		return (target - current) * plan.departureSign();
-	}
-
-	private double currentCoordinate(ActiveTrip at) {
-		RoutePlan plan = at.trip.plan();
-		return plan.axis() == RailAxis.X ? at.cart.getX() : at.cart.getZ();
 	}
 
 	// --------------------------------------------------------------- external
@@ -666,7 +710,7 @@ public final class TripService {
 
 	public boolean stationInUse(StationId id) {
 		for (ActiveTrip at : active.values()) {
-			RoutePlan plan = at.trip.plan();
+			GraphRoutePlan plan = at.plan;
 			if (plan.from().equals(id) || plan.to().equals(id)) {
 				return true;
 			}
@@ -717,5 +761,4 @@ public final class TripService {
 			}
 		}
 	}
-
 }

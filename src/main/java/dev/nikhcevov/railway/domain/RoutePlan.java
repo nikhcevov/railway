@@ -18,7 +18,7 @@ public record RoutePlan(
 		int departureSign,
 		double length,
 		String componentKey
-) {
+) implements TripPlan {
 	public RoutePlan {
 		Objects.requireNonNull(from, "from");
 		Objects.requireNonNull(to, "to");

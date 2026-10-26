@@ -9,7 +9,6 @@ import dev.nikhcevov.railway.domain.Binding;
 import dev.nikhcevov.railway.domain.BlockLocation;
 import dev.nikhcevov.railway.domain.Failure;
 import dev.nikhcevov.railway.domain.FailureCode;
-import dev.nikhcevov.railway.domain.RoutePlan;
 import dev.nikhcevov.railway.domain.Station;
 import dev.nikhcevov.railway.domain.StationId;
 import dev.nikhcevov.railway.domain.Trip;
@@ -19,10 +18,11 @@ import dev.nikhcevov.railway.minecraft.RailWorld;
 import dev.nikhcevov.railway.minecraft.Railway;
 import dev.nikhcevov.railway.minecraft.ScanService;
 import dev.nikhcevov.railway.minecraft.TripService;
-import dev.nikhcevov.railway.network.LineScan;
 import dev.nikhcevov.railway.network.RailKind;
 import dev.nikhcevov.railway.network.RailProbe;
-import dev.nikhcevov.railway.network.RoutePlanner;
+import dev.nikhcevov.railway.network.GraphRoutePlan;
+import dev.nikhcevov.railway.network.RailGraph;
+import dev.nikhcevov.railway.network.RailGraphPlanner;
 
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
@@ -307,7 +307,7 @@ public final class RailCommand {
 					Messages.failureText(lang, status.failure()));
 		} else {
 			scanText = Messages.format(lang, "scan.status.complete", station.id().value(),
-					status.line() == null ? 0 : status.line().size(), status.revision());
+					status.rails(), status.switches(), status.revision());
 		}
 		source.sendSuccess(() -> Messages.text(source, "station.info.scan", scanText), false);
 
@@ -519,7 +519,7 @@ public final class RailCommand {
 					Messages.failureText(lang, status.failure()));
 		} else {
 			text = Messages.format(lang, "scan.status.complete", status.station().value(),
-					status.line() == null ? 0 : status.line().size(), status.revision());
+					status.rails(), status.switches(), status.revision());
 		}
 		String finalText = text;
 		source.sendSuccess(() -> Component.literal(finalText), false);
@@ -537,44 +537,49 @@ public final class RailCommand {
 		if (from == null || to == null) {
 			return 0;
 		}
-		LineScan fromLine = lineOrFail(context.getSource(), railway, from);
-		if (fromLine == null) {
-			return 0;
-		}
-		LineScan toLine = lineOrFail(context.getSource(), railway, to);
-		if (toLine == null) {
-			return 0;
-		}
-		RoutePlanner.Result result = RoutePlanner.plan(from, to, fromLine, toLine, railway.config().maxRouteLength());
-		if (result instanceof RoutePlanner.Result.Rejected rejected) {
-			return fail(context.getSource(), rejected.failure());
-		}
-		RoutePlan plan = ((RoutePlanner.Result.Planned) result).plan();
 		CommandSourceStack source = context.getSource();
-		ServerLevel level = RailWorld.level(source.getServer(), plan.dimension());
+		RailGraph fromGraph = graphOrFail(source, railway, from);
+		if (fromGraph == null) {
+			return 0;
+		}
+		RailGraph toGraph = graphOrFail(source, railway, to);
+		if (toGraph == null) {
+			return 0;
+		}
+		if (!fromGraph.componentKey().equals(toGraph.componentKey())) {
+			return fail(source, Failure.of(FailureCode.NO_PATH));
+		}
+		RailGraphPlanner.Result result = RailGraphPlanner.plan(fromGraph, from.id(), to.id(),
+				from.dock(), to.dock(), railway.config().maxRouteLength());
+		if (result instanceof RailGraphPlanner.Result.Rejected rejected) {
+			return fail(source, rejected.failure());
+		}
+		GraphRoutePlan plan = ((RailGraphPlanner.Result.Planned) result).plan();
+		ServerLevel level = RailWorld.level(source.getServer(), from.dimension());
 		if (level == null) {
-			return fail(source, Failure.detail(FailureCode.WORLD_NOT_LOADED, plan.dimension()));
+			return fail(source, Failure.detail(FailureCode.WORLD_NOT_LOADED, from.dimension()));
 		}
 		RailWorld world = new RailWorld(level);
-		Failure worldFailure = world.validateRoute(plan);
+		Failure worldFailure = world.validateGraphRoute(plan);
 		if (worldFailure != null) {
 			return fail(source, worldFailure);
 		}
-		if (!world.isSafeStand(plan.exit())) {
-			return fail(source, Failure.at(FailureCode.EXIT_UNSAFE, plan.exit()));
+		if (!world.isSafeStand(to.exit())) {
+			return fail(source, Failure.at(FailureCode.EXIT_UNSAFE, to.exit()));
 		}
-		return ok(source, "route.ok", from.id().value(), to.id().value(), Long.toString(Math.round(plan.length())),
-				Integer.toString(fromLine.size()), plan.componentKey());
+		return ok(source, "route.ok", from.id().value(), to.id().value(), Integer.toString(plan.length()),
+				Integer.toString(fromGraph.rails().size()), Integer.toString(plan.switches().size()),
+				plan.componentKey());
 	}
 
-	private static LineScan lineOrFail(CommandSourceStack source, Railway railway, Station station) {
+	private static RailGraph graphOrFail(CommandSourceStack source, Railway railway, Station station) {
 		if (railway.scans().isRunning(station.id())) {
 			fail(source, Failure.detail(FailureCode.SCAN_RUNNING, station.id().value()));
 			return null;
 		}
-		LineScan line = railway.scans().line(station.id());
-		if (line != null) {
-			return line;
+		RailGraph graph = railway.scans().graph(station.id());
+		if (graph != null) {
+			return graph;
 		}
 		Failure failure = railway.scans().failure(station.id());
 		fail(source, failure != null ? failure : Failure.detail(FailureCode.SCAN_INCOMPLETE, station.id().value()));
