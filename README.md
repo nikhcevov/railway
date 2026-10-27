@@ -146,10 +146,12 @@ registered button.
 Service signs are the normal construction path. The command path remains available
 for administration and migration. See [`docs/commands.md`](docs/commands.md).
 
-Graph scans start automatically: after a server restart every anchored station in
-a loaded dimension is scanned in the background, and a trip launch or
-`/rail route check` starts the missing scan on demand. `/rail network scan` is
-only a manual forced rescan/diagnostic tool and is never required before a trip.
+Graph scans start automatically: after a server restart anchored stations in
+loaded dimensions are scanned one at a time, and each successful scan covers
+every station on its connected component, so startup performs one scan per
+component instead of one per station. A trip launch or `/rail route check`
+starts a missing scan on demand. `/rail network scan` is only a manual forced
+rescan/diagnostic tool and is never required before a trip.
 
 ## Configuration
 
@@ -179,8 +181,10 @@ is fixed and `/rail reload` or a restart succeeds. See
   the budget is exhausted or ticket budget is 0, that scan fails with
   `CHUNKS_NOT_READY` instead of crashing or planning a partial graph.
 - Scans are derived caches: they auto-start after restart and on demand, so no
-  manual `/rail network scan` is needed. A failed automatic scan is retried no
-  more than once per 10 seconds per station; a successful scan clears the delay.
+  manual `/rail network scan` is needed. Startup scans run one at a time and
+  share their graph with every station on the same component; a failed automatic
+  scan is retried no more than once per 10 seconds per station, and a successful
+  scan clears the delay.
 - On restart, persisted checkpoint carts are reconciled by UUID and safely
   removed/stopped; trips never resume automatically.
 - State is stored in `<world>/railway/state.json` (schema 4). Migrations create a

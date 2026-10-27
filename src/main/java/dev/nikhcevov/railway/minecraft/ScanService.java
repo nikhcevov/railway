@@ -18,8 +18,10 @@ import net.minecraft.world.level.ChunkPos;
 import org.slf4j.Logger;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -44,9 +46,30 @@ public final class ScanService {
 	 */
 	public static final int MAX_SCAN_TICKETS = 32;
 
+	/**
+	 * Station snapshot used to recognise other anchored stations that share a
+	 * scanned component. The snapshot is read only when a scan completes.
+	 */
+	@FunctionalInterface
+	public interface StationSource {
+		Collection<Station> stations();
+	}
+
+	/**
+	 * One diagnostics row. {@code station} is the station being described;
+	 * {@code coveredBy} is non-null when its graph comes from another station's
+	 * job, and {@code covered} lists the stations this job itself covers.
+	 */
 	public record Status(String jobId, StationId station, int rails, int switches, boolean running,
 			boolean waiting, int pendingChunks, boolean complete, Failure failure, RailGraph graph,
-			long startedTick, long revision) {
+			long startedTick, long revision, StationId coveredBy, List<StationId> covered) {
+		public Status {
+			covered = covered == null ? List.of() : List.copyOf(covered);
+		}
+	}
+
+	/** A station that reuses another station's completed component graph. */
+	private record Alias(StationId owner, Station station) {
 	}
 
 	private static final class Job {
@@ -145,14 +168,29 @@ public final class ScanService {
 	}
 
 	private final Map<StationId, Job> jobs = new LinkedHashMap<>();
+	/** Stations that reuse another station's graph, mapped to the owning station. */
+	private final Map<StationId, Alias> aliases = new LinkedHashMap<>();
+	/** Startup stations waiting for their turn; removed once covered by a scan. */
+	private final Map<StationId, Station> startupPending = new LinkedHashMap<>();
 	private final Logger logger;
 	private final ChunkTicketManager tickets;
+	private final StationSource stationSource;
 	private final ScanRetryCooldown retry = new ScanRetryCooldown();
+	private Config startupConfig = Config.defaults();
+	private long startupRevision;
+	private StationId startupActive;
+	private int startupStarted;
+	private int startupCompleted;
+	private int startupCovered;
+	private int startupFailed;
+	private int startupSkipped;
+	private boolean startupSummaryPending;
 	private long nextJobId = 1;
 
-	public ScanService(Logger logger, ChunkTicketManager tickets) {
+	public ScanService(Logger logger, ChunkTicketManager tickets, StationSource stationSource) {
 		this.logger = logger;
 		this.tickets = tickets;
+		this.stationSource = stationSource;
 	}
 
 	public sealed interface StartResult {
@@ -172,6 +210,10 @@ public final class ScanService {
 		if (existing != null && !existing.scanner.isFinished()) {
 			return new StartResult.Rejected(Failure.detail(FailureCode.SCAN_RUNNING, station.id().value()));
 		}
+		// A real scan always supersedes a shared alias: the station now owns a
+		// job, and until that job completes it must not report the old graph.
+		aliases.remove(station.id());
+		startupPending.remove(station.id());
 		String jobId = "scan-" + nextJobId++;
 		ScanView view = new ScanView(level, logger);
 		Job job = new Job(jobId, station.id(), level, view, config.scanRailsPerTick(),
@@ -205,6 +247,12 @@ public final class ScanService {
 	 */
 	public StartResult autoStart(Station station, ServerLevel level, Config config, long tick, long revision) {
 		StationId id = station.id();
+		if (graph(id) != null) {
+			// A shared component graph already answers this station; never start
+			// a second scan just because it has no job of its own.
+			return new StartResult.Rejected(Failure.detail(FailureCode.SCAN_RUNNING,
+					id.value() + " (graph already available)"));
+		}
 		if (isRunning(id)) {
 			return new StartResult.Rejected(Failure.detail(FailureCode.SCAN_RUNNING, id.value()));
 		}
@@ -230,6 +278,97 @@ public final class ScanService {
 				station.value() + " (scan started automatically)");
 	}
 
+	/**
+	 * Queues startup scans and starts the first one. Only one startup scan runs at
+	 * a time; when it succeeds, every anchored station whose dock is on the same
+	 * component reuses its graph instead of scanning again. Provisional stations
+	 * are skipped, and a station whose dimension is not loaded is logged and
+	 * skipped.
+	 */
+	public void queueStartup(Collection<Station> stations, Config config, MinecraftServer server, long revision) {
+		startupConfig = config;
+		startupRevision = revision;
+		int queued = 0;
+		for (Station station : stations) {
+			if (!station.isAnchored()) {
+				continue;
+			}
+			if (graph(station.id()) != null || isRunning(station.id())) {
+				continue;
+			}
+			if (RailWorld.level(server, station.dimension()) == null) {
+				logger.warn("Cannot auto-scan station {}: dimension {} is not loaded",
+						station.id().value(), station.dimension());
+				startupSkipped++;
+				continue;
+			}
+			startupPending.put(station.id(), station);
+			queued++;
+		}
+		if (queued > 0) {
+			startupSummaryPending = true;
+			logger.info("Startup scan queue: {} station(s); one scan per connected component", queued);
+		}
+		pumpStartup(server, server.getTickCount());
+	}
+
+	private void pumpStartup(MinecraftServer server, long tick) {
+		if (startupActive != null) {
+			Job active = jobs.get(startupActive);
+			if (active != null && !active.scanner.isFinished()) {
+				return;
+			}
+			startupActive = null;
+		}
+		Iterator<Station> iterator = startupPending.values().iterator();
+		while (iterator.hasNext()) {
+			Station station = iterator.next();
+			iterator.remove();
+			if (!station.isAnchored()) {
+				continue;
+			}
+			if (graph(station.id()) != null || isRunning(station.id())) {
+				// Covered by a scan that finished while this station waited, or a
+				// real job (manual/on-demand) is already running for it.
+				continue;
+			}
+			ServerLevel level = RailWorld.level(server, station.dimension());
+			if (level == null) {
+				logger.warn("Cannot auto-scan station {}: dimension {} is not loaded",
+						station.id().value(), station.dimension());
+				startupSkipped++;
+				continue;
+			}
+			StartResult result = autoStart(station, level, startupConfig, tick, startupRevision);
+			if (result instanceof StartResult.Started) {
+				startupActive = station.id();
+				startupStarted++;
+				return;
+			}
+			if (result instanceof StartResult.Rejected rejected) {
+				logger.warn("Automatic startup scan for station {} did not start: {} {}",
+						station.id().value(), rejected.failure().code(), rejected.failure().detail());
+				startupSkipped++;
+			}
+		}
+		finishStartupSummary();
+	}
+
+	private void finishStartupSummary() {
+		if (!startupSummaryPending || startupActive != null) {
+			return;
+		}
+		logger.info("Startup scans finished: {} started, {} completed, {} station(s) covered by shared "
+						+ "components, {} failed, {} skipped",
+				startupStarted, startupCompleted, startupCovered, startupFailed, startupSkipped);
+		startupSummaryPending = false;
+		startupStarted = 0;
+		startupCompleted = 0;
+		startupCovered = 0;
+		startupFailed = 0;
+		startupSkipped = 0;
+	}
+
 	public void tick(MinecraftServer server) {
 		long tick = server.getTickCount();
 		for (Job job : List.copyOf(jobs.values())) {
@@ -245,6 +384,7 @@ public final class ScanService {
 				complete(job, tick);
 			}
 		}
+		pumpStartup(server, tick);
 	}
 
 	/**
@@ -286,20 +426,107 @@ public final class ScanService {
 	private void complete(Job job, long tick) {
 		tickets.releaseScan(job.id);
 		job.view.close();
+		boolean startupJob = job.station.equals(startupActive);
 		if (job.scanner.isFailed()) {
 			job.failure = job.scanner.failure();
+			// A failed component must not leave stations aliased to a graph that
+			// no longer exists; they can start a real scan on demand.
+			removeAliasesOwnedBy(job.station);
 			// Keep a failed geometry scan from being restarted by every button
 			// press; a manual `/rail network scan` still bypasses the cooldown.
 			retry.recordFailure(job.station, tick);
 			logger.warn("Scan {} for station {} failed: {} at {}{}", job.id, job.station,
 					job.failure.code(), job.failure.location() == null ? "-" : job.failure.location().shortString(),
 					job.failure.detail() == null ? "" : ": " + job.failure.detail());
+			if (startupJob) {
+				startupFailed++;
+				startupActive = null;
+			}
 		} else {
 			job.graph = job.scanner.graph();
 			retry.clear(job.station);
-			logger.info("Scan {} for station {} complete: {} rails, {} switches",
-					job.id, job.station, job.graph.rails().size(), job.graph.switches().size());
+			int pendingBefore = startupPending.size();
+			int newlyCovered = coverStations(job);
+			int pendingCovered = pendingBefore - startupPending.size();
+			if (pendingCovered > 0 && startupSummaryPending) {
+				startupCovered += pendingCovered;
+			}
+			logger.info("Scan {} for station {} complete: {} rails, {} switches{}",
+					job.id, job.station, job.graph.rails().size(), job.graph.switches().size(),
+					newlyCovered == 0 ? "" : "; covers " + newlyCovered
+							+ " station(s) on the same component");
+			if (startupJob) {
+				startupCompleted++;
+				startupActive = null;
+			}
 		}
+	}
+
+	/**
+	 * Marks every known anchored station whose dock is on this graph as covered
+	 * by the job's graph. Existing aliases of this job are revalidated against the
+	 * new graph, so a rescan can never leave a station pointing at a component
+	 * that no longer contains its dock.
+	 *
+	 * @return number of stations newly aliased to this job
+	 */
+	private int coverStations(Job job) {
+		RailGraph graph = job.graph;
+		if (graph == null) {
+			return 0;
+		}
+		Map<StationId, Station> candidates = new LinkedHashMap<>();
+		for (Station station : stationSource.stations()) {
+			if (station.isAnchored() && station.dimension().equals(graph.dimension())) {
+				candidates.put(station.id(), station);
+			}
+		}
+		for (Station station : startupPending.values()) {
+			if (station.isAnchored() && station.dimension().equals(graph.dimension())) {
+				candidates.put(station.id(), station);
+			}
+		}
+
+		Iterator<Map.Entry<StationId, Alias>> existing = aliases.entrySet().iterator();
+		while (existing.hasNext()) {
+			Map.Entry<StationId, Alias> entry = existing.next();
+			Alias alias = entry.getValue();
+			if (!alias.owner().equals(job.station)) {
+				continue;
+			}
+			Station station = candidates.get(entry.getKey());
+			if (station == null || graph.rail(station.dock()) == null) {
+				existing.remove();
+			}
+		}
+
+		int newlyCovered = 0;
+		for (Map.Entry<StationId, Station> entry : candidates.entrySet()) {
+			StationId id = entry.getKey();
+			Station station = entry.getValue();
+			if (id.equals(job.station) || graph.rail(station.dock()) == null) {
+				continue;
+			}
+			Job own = jobs.get(id);
+			if (own != null) {
+				if (own.graph != null || !own.scanner.isFinished()) {
+					continue;
+				}
+				// A failed scan is superseded by a working component graph.
+				jobs.remove(id);
+				retry.clear(id);
+			}
+			Alias previous = aliases.put(id, new Alias(job.station, station));
+			startupPending.remove(id);
+			if (previous == null || !previous.owner().equals(job.station)) {
+				newlyCovered++;
+			}
+		}
+		return newlyCovered;
+	}
+
+	private void removeAliasesOwnedBy(StationId owner) {
+		aliases.entrySet().removeIf(entry -> entry.getValue().owner().equals(owner));
 	}
 
 	private void discard(Job job) {
@@ -309,15 +536,27 @@ public final class ScanService {
 
 	public Optional<Status> status(StationId station) {
 		Job job = jobs.get(station);
-		if (job == null) {
-			return Optional.empty();
+		if (job != null && (job.graph != null || !job.scanner.isFinished())) {
+			return Optional.of(status(job, station, null));
 		}
+		StationId owner = liveOwner(station);
+		if (owner != null) {
+			Job ownerJob = jobs.get(owner);
+			if (ownerJob != null) {
+				return Optional.of(status(ownerJob, station, owner));
+			}
+		}
+		return job == null ? Optional.empty() : Optional.of(status(job, station, null));
+	}
+
+	private Status status(Job job, StationId station, StationId coveredBy) {
 		RailGraph graph = job.graph;
 		int pendingChunks = pendingChunks(job.scanner);
-		return Optional.of(new Status(job.id, job.station, job.scanner.railCount(),
+		return new Status(job.id, station, job.scanner.railCount(),
 				graph == null ? 0 : graph.switches().size(), !job.scanner.isFinished(),
 				job.scanner.isWaiting(), pendingChunks, graph != null,
-				job.failure, graph, job.startedTick, job.revision));
+				job.failure, graph, job.startedTick, job.revision, coveredBy,
+				coveredBy == null && graph != null ? coveredStations(job.station) : List.of());
 	}
 
 	private static int pendingChunks(GraphScanner scanner) {
@@ -328,45 +567,123 @@ public final class ScanService {
 		return keys.size();
 	}
 
+	private List<StationId> coveredStations(StationId owner) {
+		List<StationId> result = new ArrayList<>();
+		for (Map.Entry<StationId, Alias> entry : aliases.entrySet()) {
+			if (entry.getValue().owner().equals(owner)) {
+				result.add(entry.getKey());
+			}
+		}
+		return result;
+	}
+
+	/** Real jobs only; covered stations are reported through their owner's row. */
 	public List<Status> all() {
 		List<Status> result = new ArrayList<>();
-		for (StationId id : jobs.keySet()) {
-			status(id).ifPresent(result::add);
+		for (Map.Entry<StationId, Job> entry : jobs.entrySet()) {
+			result.add(status(entry.getValue(), entry.getKey(), null));
 		}
 		return result;
 	}
 
 	public RailGraph graph(StationId station) {
 		Job job = jobs.get(station);
-		return job == null ? null : job.graph;
+		if (job != null && job.graph != null) {
+			return job.graph;
+		}
+		StationId owner = liveOwner(station);
+		if (owner == null) {
+			return null;
+		}
+		Job ownerJob = jobs.get(owner);
+		return ownerJob == null ? null : ownerJob.graph;
+	}
+
+	/**
+	 * Resolves a live alias. Missing owners and failed jobs invalidate the alias
+	 * instead of returning a stale component graph.
+	 */
+	private StationId liveOwner(StationId station) {
+		Alias alias = aliases.get(station);
+		if (alias == null) {
+			return null;
+		}
+		Job ownerJob = jobs.get(alias.owner());
+		if (ownerJob == null || (ownerJob.scanner.isFinished() && ownerJob.graph == null)) {
+			aliases.remove(station);
+			return null;
+		}
+		return alias.owner();
 	}
 
 	public Failure failure(StationId station) {
 		Job job = jobs.get(station);
-		return job == null ? null : job.failure;
+		if (job != null && job.graph == null && job.failure != null) {
+			return job.failure;
+		}
+		StationId owner = liveOwner(station);
+		if (owner != null) {
+			Job ownerJob = jobs.get(owner);
+			return ownerJob == null ? null : ownerJob.failure;
+		}
+		return null;
 	}
 
 	public boolean isRunning(StationId station) {
 		Job job = jobs.get(station);
-		return job != null && !job.scanner.isFinished();
+		if (job != null && !job.scanner.isFinished()) {
+			return true;
+		}
+		StationId owner = liveOwner(station);
+		if (owner != null) {
+			Job ownerJob = jobs.get(owner);
+			return ownerJob != null && !ownerJob.scanner.isFinished();
+		}
+		return false;
 	}
 
+	/**
+	 * Invalidating any station that uses a shared graph removes the graph for the
+	 * owner and for every other station aliased to it, so no station can keep a
+	 * stale component.
+	 */
 	public void invalidate(StationId station) {
-		Job job = jobs.remove(station);
+		Alias alias = aliases.remove(station);
+		if (alias != null) {
+			Job own = jobs.remove(station);
+			if (own != null) {
+				discard(own);
+			}
+			retry.clear(station);
+			invalidateShared(alias.owner());
+			return;
+		}
+		invalidateShared(station);
+	}
+
+	private void invalidateShared(StationId owner) {
+		Job job = jobs.remove(owner);
 		if (job != null) {
 			discard(job);
 		}
-		retry.clear(station);
+		retry.clear(owner);
+		removeAliasesOwnedBy(owner);
+		startupPending.remove(owner);
+		if (owner.equals(startupActive)) {
+			startupActive = null;
+		}
 	}
 
 	public void invalidate(BlockLocation location) {
-		List<StationId> affected = new ArrayList<>();
+		Set<StationId> affected = new LinkedHashSet<>();
 		for (Job job : jobs.values()) {
 			if (job.graph != null && job.graph.rail(location) != null) {
 				affected.add(job.station);
 			}
 		}
-		affected.forEach(this::invalidate);
+		for (StationId owner : affected) {
+			invalidateShared(owner);
+		}
 	}
 
 	public void clear() {
@@ -374,6 +691,15 @@ public final class ScanService {
 			discard(job);
 		}
 		jobs.clear();
+		aliases.clear();
+		startupPending.clear();
+		startupActive = null;
+		startupSummaryPending = false;
+		startupStarted = 0;
+		startupCompleted = 0;
+		startupCovered = 0;
+		startupFailed = 0;
+		startupSkipped = 0;
 		retry.clear();
 	}
 }

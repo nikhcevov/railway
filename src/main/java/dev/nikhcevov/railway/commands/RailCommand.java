@@ -333,21 +333,9 @@ public final class RailCommand {
 			source.sendSuccess(() -> Messages.text(source, "station.info.bindings", builder.toString()), false);
 		}
 		ScanService.Status status = railway.scans().status(station.id()).orElse(null);
-		String scanText;
-		if (status == null) {
-			scanText = Messages.format(lang, "scan.status.missing", station.id().value());
-		} else if (status.running()) {
-			scanText = status.waiting()
-					? Messages.format(lang, "scan.status.waiting", station.id().value(),
-							status.pendingChunks(), status.rails())
-					: Messages.format(lang, "scan.status.running", station.id().value(), status.rails());
-		} else if (status.failure() != null) {
-			scanText = Messages.format(lang, "scan.status.failed", station.id().value(),
-					scanFailureText(lang, status.failure()));
-		} else {
-			scanText = Messages.format(lang, "scan.status.complete", station.id().value(),
-					status.rails(), status.switches(), status.revision());
-		}
+		String scanText = status == null
+				? Messages.format(lang, "scan.status.missing", station.id().value())
+				: scanStatusText(lang, status);
 		source.sendSuccess(() -> Messages.text(source, "station.info.scan", scanText), false);
 
 		ServerLevel level = RailWorld.level(source.getServer(), station.dimension());
@@ -558,7 +546,11 @@ public final class RailCommand {
 	}
 
 	private static void sendScanStatus(CommandSourceStack source, ScanService.Status status) {
-		Messages.Lang lang = Messages.lang(source);
+		String finalText = scanStatusText(Messages.lang(source), status);
+		source.sendSuccess(() -> Component.literal(finalText), false);
+	}
+
+	private static String scanStatusText(Messages.Lang lang, ScanService.Status status) {
 		String text;
 		if (status.running()) {
 			text = status.waiting()
@@ -572,8 +564,23 @@ public final class RailCommand {
 			text = Messages.format(lang, "scan.status.complete", status.station().value(),
 					status.rails(), status.switches(), status.revision());
 		}
-		String finalText = text;
-		source.sendSuccess(() -> Component.literal(finalText), false);
+		if (status.coveredBy() != null) {
+			text += Messages.format(lang, "scan.status.covered", status.coveredBy().value());
+		} else if (!status.covered().isEmpty()) {
+			text += Messages.format(lang, "scan.status.covers", stationList(status.covered()));
+		}
+		return text;
+	}
+
+	private static String stationList(List<StationId> stations) {
+		StringBuilder builder = new StringBuilder();
+		for (StationId station : stations) {
+			if (!builder.isEmpty()) {
+				builder.append(", ");
+			}
+			builder.append(station.value());
+		}
+		return builder.toString();
 	}
 
 	/** A scan timeout is not a trip stop, so keep its wording scan-specific. */

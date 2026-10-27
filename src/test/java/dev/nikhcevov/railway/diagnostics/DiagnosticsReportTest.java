@@ -48,7 +48,8 @@ class DiagnosticsReportTest {
 		assertContains(lines, "  quarantined rail:alpha:1,64,2: cart removed (trip " + TRIP
 				+ ", cart " + CART + ")");
 		assertContains(lines, "Scan jobs (1):");
-		assertContains(lines, "Scan scan-1 @ alpha: complete, rails 10, switches 2, revision 9");
+		assertContains(lines, "Scan scan-1 @ alpha: complete, rails 10, switches 2, revision 9 "
+				+ "(covers beta)");
 		assertContains(lines, "Chunk tickets: held 2/128, pending 1; recovery checkpoints 1, "
 				+ "tickets 1, acq 2, rel 1; scans 3, tickets 2, acq 4, rel 3");
 		assertContains(lines, "Stations (2):");
@@ -64,7 +65,8 @@ class DiagnosticsReportTest {
 		assertContains(lines, "Station detail alpha (Alpha) | minecraft:overworld | 1 64 2");
 		assertContains(lines, "  main: 1 64 5 (m flag)");
 		assertContains(lines, "  bindings: alpha->beta @ 0 64 4 dock 1 64 2");
-		assertContains(lines, "  scan: Scan scan-1 @ alpha: complete, rails 10, switches 2, revision 9");
+		assertContains(lines, "  scan: Scan scan-1 @ alpha: complete, rails 10, switches 2, revision 9 "
+				+ "(covers beta)");
 		assertContains(lines, "  graph: revision 9, component comp-1, rails 10, switches 2");
 	}
 
@@ -114,9 +116,11 @@ class DiagnosticsReportTest {
 
 	@Test
 	void rendersRunningAndFailedScanStatusesWithFailureCode() {
-		ScanSummary running = new ScanSummary("scan-r", ALPHA, 12, 1, true, null, 4, null);
+		ScanSummary running = new ScanSummary("scan-r", ALPHA, 12, 1, true, null, 4, null,
+				null, List.of());
 		ScanSummary failed = new ScanSummary("scan-f", BETA, 3, 1, false,
-				Failure.at(FailureCode.NO_RAIL, new BlockLocation(4, 64, 7), "detail"), 5, null);
+				Failure.at(FailureCode.NO_RAIL, new BlockLocation(4, 64, 7), "detail"), 5, null,
+				null, List.of());
 		DiagnosticsReport report = emptyReport(List.of(running, failed), List.of(),
 				Optional.empty());
 
@@ -125,6 +129,23 @@ class DiagnosticsReportTest {
 		assertContains(lines, "Scan scan-r @ alpha: running, rails 12, switches 1, revision 4");
 		assertContains(lines, "Scan scan-f @ beta: failed, rails 3, switches 1, revision 5: "
 				+ "No rail block at the target position. (4 64 7) [NO_RAIL]");
+	}
+
+	@Test
+	void rendersSharedComponentCoverageForOwnerAndCoveredStation() {
+		ScanSummary owner = new ScanSummary("scan-s", ALPHA, 12, 1, false, null, 4,
+				new GraphSummary(4, "comp-shared", 12, 1), null, List.of(BETA));
+		ScanSummary covered = new ScanSummary("scan-s", BETA, 12, 1, false, null, 4,
+				new GraphSummary(4, "comp-shared", 12, 1), ALPHA, List.of());
+		DiagnosticsReport report = emptyReport(List.of(owner, covered), List.of(),
+				Optional.empty());
+
+		List<String> lines = report.render(Messages.Lang.EN);
+
+		assertContains(lines, "Scan scan-s @ alpha: complete, rails 12, switches 1, revision 4 "
+				+ "(covers beta)");
+		assertContains(lines, "Scan scan-s @ beta: complete, rails 12, switches 1, revision 4 "
+				+ "(covered by alpha)");
 	}
 
 	@Test
@@ -156,7 +177,7 @@ class DiagnosticsReportTest {
 		SignMarker main = new SignMarker("minecraft:overworld", new BlockLocation(1, 64, 5),
 				new BlockLocation(1, 63, 5), false, null, ALPHA, ALPHA, true);
 		ScanSummary scan = new ScanSummary("scan-1", ALPHA, 10, 2, false, null, 9,
-				new GraphSummary(9, "comp-1", 10, 2));
+				new GraphSummary(9, "comp-1", 10, 2), null, List.of(BETA));
 		StationSummary alpha = new StationSummary(ALPHA, "Alpha", "minecraft:overworld", true,
 				3, false, new BlockLocation(1, 64, 2), new BlockLocation(1, 64, 4), 2, main,
 				List.of(new BindingSummary(ALPHA, BETA, new BlockLocation(0, 64, 4),

@@ -66,16 +66,26 @@ scan when the source graph already covers it.
 Graphs are derived caches and are never persisted, so scanning needs no admin
 command:
 
-- on server start, after recovery has begun, one background scan starts for every
-  anchored station whose dimension is loaded. Provisional stations are skipped; a
-  missing level or a rejected start is only logged and never disables Railway;
+- on server start, after recovery has begun, anchored stations in loaded
+  dimensions are queued and scanned one at a time. Provisional stations are
+  skipped; a missing level or a rejected start is only logged and never disables
+  Railway;
+- when one scan succeeds, every anchored station whose dock is on that connected
+  component reuses the graph and its queued scan is skipped. Startup therefore
+  performs one scan per component, not one per station, and logs a summary of
+  scans started/completed, stations covered, failures and skipped stations;
 - a trip launch or `/rail route check` that finds neither a graph nor a running
   job starts the scan automatically and rejects that attempt with `SCAN_RUNNING`
   ("scan started automatically"); the next attempt succeeds once the scan
-  finishes. If the source graph already contains the destination dock, the
+  finishes. Covered stations resolve to their owner's graph, so they do not start
+  another scan. If the source graph already contains the destination dock, the
   destination is not rescanned;
 - jobs are deduplicated per station and continue in the background after players
-  join; a restart simply starts fresh scans;
+  join; a restart simply starts fresh scans. A manual `/rail network scan` of a
+  covered station clears its alias and starts a real job;
+- invalidating a block on a shared graph, or invalidating any station that uses
+  it, removes the graph from the owner and every covered station; no alias keeps a
+  stale graph;
 - after a failed automatic scan, further automatic attempts for that station wait
   200 ticks (10 seconds). A successful scan or an invalidation clears the delay,
   and `/rail network scan <station>` bypasses it. The last failure remains

@@ -118,8 +118,13 @@ public record DiagnosticsReport(
 			boolean running,
 			Failure failure,
 			long revision,
-			GraphSummary graph
+			GraphSummary graph,
+			StationId coveredBy,
+			List<StationId> covered
 	) {
+		public ScanSummary {
+			covered = covered == null ? List.of() : List.copyOf(covered);
+		}
 	}
 
 	public record GraphSummary(long revision, String component, int rails, int switches) {
@@ -332,17 +337,35 @@ public record DiagnosticsReport(
 	}
 
 	private static String scanText(Messages.Lang lang, ScanSummary scan) {
+		String text;
 		if (scan.running()) {
-			return Messages.format(lang, "diagnostics.scan.running", scan.jobId(),
+			text = Messages.format(lang, "diagnostics.scan.running", scan.jobId(),
 					scan.station().value(), scan.rails(), scan.switches(), scan.revision());
-		}
-		if (scan.failure() != null) {
-			return Messages.format(lang, "diagnostics.scan.failed", scan.jobId(),
+		} else if (scan.failure() != null) {
+			text = Messages.format(lang, "diagnostics.scan.failed", scan.jobId(),
 					scan.station().value(), scan.rails(), scan.switches(), scan.revision(),
 					Messages.failureText(lang, scan.failure()));
+		} else {
+			text = Messages.format(lang, "diagnostics.scan.complete", scan.jobId(),
+					scan.station().value(), scan.rails(), scan.switches(), scan.revision());
 		}
-		return Messages.format(lang, "diagnostics.scan.complete", scan.jobId(),
-				scan.station().value(), scan.rails(), scan.switches(), scan.revision());
+		if (scan.coveredBy() != null) {
+			text += Messages.format(lang, "diagnostics.scan.covered_by", scan.coveredBy().value());
+		} else if (!scan.covered().isEmpty()) {
+			text += Messages.format(lang, "diagnostics.scan.covers", stationList(scan.covered()));
+		}
+		return text;
+	}
+
+	private static String stationList(List<StationId> stations) {
+		StringBuilder builder = new StringBuilder();
+		for (StationId station : stations) {
+			if (!builder.isEmpty()) {
+				builder.append(", ");
+			}
+			builder.append(station.value());
+		}
+		return builder.toString();
 	}
 
 	private static void add(List<String> lines, Messages.Lang lang, String key, Object... args) {

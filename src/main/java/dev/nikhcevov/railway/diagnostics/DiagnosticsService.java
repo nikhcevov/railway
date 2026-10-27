@@ -127,6 +127,7 @@ public final class DiagnosticsService {
 						status.graph().componentKey(), status.graph().rails().size(),
 						status.graph().switches().size());
 		return new DiagnosticsReport.ScanSummary(status.jobId(), status.station(), status.rails(),
-				status.switches(), status.running(), status.failure(), status.revision(), graph);
+				status.switches(), status.running(), status.failure(), status.revision(), graph,
+				status.coveredBy(), status.covered());
 	}
 }

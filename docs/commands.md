@@ -102,9 +102,12 @@ updated together.
 
 Starts a tick-batched scan from the station main dock and returns a job ID. This
 is a manual forced rescan and diagnostics tool; it is not required before route
-checks or trips. Scans are derived caches, never persisted: after a restart every
-anchored station in a loaded dimension is scanned automatically, and a missing
-graph is also built on demand by a trip launch or `/rail route check`.
+checks or trips. Scans are derived caches, never persisted: after a restart
+anchored stations in loaded dimensions are scanned automatically one at a time,
+and each successful scan covers every station on its connected component. A
+missing graph is also built on demand by a trip launch or `/rail route check`.
+If the station currently reuses another station's graph, the manual scan clears
+that alias and starts a real job for the station.
 
 A manual scan bypasses the automatic retry delay. After a failed automatic scan,
 further automatic attempts for that station wait 10 seconds (200 ticks); a
@@ -115,7 +118,10 @@ shared ticket budget cannot load the scan frontier, the job fails with
 ### `/rail network status [station]`
 
 Shows scan jobs, completion/failure, rail/switch counts, graph revision, and
-failure reason. Without a station, lists all jobs.
+failure reason. A station covered by another station's component graph reports
+the owning scan and its graph instead of claiming that no scan exists; the owner
+lists the stations it covers. Without a station, lists all real jobs (covered
+stations are not separate jobs).
 
 ## Route and trip commands
 

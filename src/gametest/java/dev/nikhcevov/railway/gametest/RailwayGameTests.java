@@ -11,6 +11,7 @@ import dev.nikhcevov.railway.minecraft.RailWorld;
 import dev.nikhcevov.railway.minecraft.Railway;
 import dev.nikhcevov.railway.minecraft.ScanService;
 import dev.nikhcevov.railway.minecraft.TripService;
+import dev.nikhcevov.railway.network.RailGraph;
 
 import net.fabricmc.fabric.api.gametest.v1.CustomTestMethodInvoker;
 import net.fabricmc.fabric.api.gametest.v1.GameTest;
@@ -143,10 +144,11 @@ public final class RailwayGameTests implements CustomTestMethodInvoker {
 	}
 
 	/**
-	 * The startup hook starts one scan per anchored, loadable station and skips
-	 * provisional stations. The real server-start invocation cannot be replayed
-	 * inside a shared GameTest server, so this exercises the same production
-	 * method with an explicit station list.
+	 * The startup hook queues anchored, loadable stations, starts them one at a
+	 * time, skips provisional stations, and shares the first component graph with
+	 * the other station instead of scanning twice. The real server-start
+	 * invocation cannot be replayed inside a shared GameTest server, so this
+	 * exercises the same production method with an explicit station list.
 	 */
 	@GameTest(maxTicks = 600)
 	public void startupScansAnchoredStationsOnly(GameTestHelper helper) {
@@ -158,15 +160,132 @@ public final class RailwayGameTests implements CustomTestMethodInvoker {
 				"Game Test Provisional", fixture.home().dimension(),
 				fixture.railway().state().nextRevision());
 		fixture.railway().startScansFor(List.of(fixture.home(), fixture.mine(), provisional));
-		if (!scans.isRunning(fixture.home().id()) || !scans.isRunning(fixture.mine().id())) {
-			throw helper.assertionException("startup did not start scans for anchored stations");
+		if (!scans.isRunning(fixture.home().id()) && scans.graph(fixture.home().id()) == null) {
+			throw helper.assertionException("startup did not start a scan for anchored stations");
 		}
 		if (scans.status(provisional.id()).isPresent()) {
 			throw helper.assertionException("startup scanned a provisional station");
 		}
 		helper.succeedWhen(() -> {
-			if (scans.graph(fixture.home().id()) == null || scans.graph(fixture.mine().id()) == null) {
+			ScanService.Status mineStatus = scans.status(fixture.mine().id()).orElse(null);
+			if (scans.graph(fixture.home().id()) == null || mineStatus == null
+					|| mineStatus.graph() == null) {
 				throw helper.assertionException("startup scans did not complete");
+			}
+			if (!fixture.home().id().equals(mineStatus.coveredBy())) {
+				throw helper.assertionException("startup did not share the component graph");
+			}
+		});
+	}
+
+	/**
+	 * Two stations on one component share a single actual scan during startup,
+	 * while an isolated station still gets its own scan. Invalidating a block on
+	 * the shared graph removes it for both of its users.
+	 */
+	@GameTest(maxTicks = 600)
+	public void startupScansOneComponentOnce(GameTestHelper helper) {
+		Fixture fixture = buildFixture(helper, "share");
+		Railway railway = fixture.railway();
+		ScanService scans = railway.scans();
+		Station isolated = buildIsolatedStation(helper, railway, "share");
+		scans.invalidate(fixture.home().id());
+		scans.invalidate(fixture.mine().id());
+		scans.invalidate(isolated.id());
+
+		railway.startScansFor(List.of(fixture.home(), fixture.mine(), isolated));
+
+		helper.succeedWhen(() -> {
+			RailGraph homeGraph = scans.graph(fixture.home().id());
+			RailGraph mineGraph = scans.graph(fixture.mine().id());
+			RailGraph isolatedGraph = scans.graph(isolated.id());
+			ScanService.Status homeStatus = scans.status(fixture.home().id()).orElse(null);
+			ScanService.Status mineStatus = scans.status(fixture.mine().id()).orElse(null);
+			ScanService.Status isolatedStatus = scans.status(isolated.id()).orElse(null);
+			if (homeGraph == null || mineGraph == null || isolatedGraph == null
+					|| homeStatus == null || mineStatus == null || isolatedStatus == null) {
+				throw helper.assertionException("component startup scans did not complete");
+			}
+			if (homeGraph != mineGraph) {
+				throw helper.assertionException("stations on one component received different graphs");
+			}
+			if (!fixture.home().id().equals(mineStatus.coveredBy())
+					|| !homeStatus.jobId().equals(mineStatus.jobId())) {
+				throw helper.assertionException("covered station does not report the shared scan");
+			}
+			if (!homeStatus.covered().contains(fixture.mine().id())) {
+				throw helper.assertionException("owner scan does not list the covered station");
+			}
+			if (scans.all().stream().anyMatch(status -> status.station().equals(fixture.mine().id()))) {
+				throw helper.assertionException("covered station started its own scan job");
+			}
+			if (isolatedStatus.coveredBy() != null
+					|| homeStatus.jobId().equals(isolatedStatus.jobId())
+					|| isolatedGraph.componentKey().equals(homeGraph.componentKey())) {
+				throw helper.assertionException("isolated station did not scan independently");
+			}
+			scans.invalidate(fixture.mine().dock());
+			if (scans.graph(fixture.home().id()) != null || scans.graph(fixture.mine().id()) != null) {
+				throw helper.assertionException("invalidating a shared graph left it usable");
+			}
+			if (scans.graph(isolated.id()) == null) {
+				throw helper.assertionException("unrelated component was invalidated");
+			}
+		});
+	}
+
+	/** Invalidating a covered station must drop the graph for every station sharing it. */
+	@GameTest(maxTicks = 600)
+	public void invalidatingCoveredStationDropsSharedGraph(GameTestHelper helper) {
+		Fixture fixture = buildFixture(helper, "aliasinv");
+		ScanService scans = fixture.railway().scans();
+		scans.invalidate(fixture.home().id());
+		scans.invalidate(fixture.mine().id());
+		fixture.railway().startScansFor(List.of(fixture.home(), fixture.mine()));
+
+		helper.succeedWhen(() -> {
+			ScanService.Status mineStatus = scans.status(fixture.mine().id()).orElse(null);
+			if (mineStatus == null || !fixture.home().id().equals(mineStatus.coveredBy())) {
+				throw helper.assertionException("startup did not share the component graph");
+			}
+			scans.invalidate(fixture.mine().id());
+			if (scans.graph(fixture.home().id()) != null || scans.graph(fixture.mine().id()) != null) {
+				throw helper.assertionException("alias invalidation left a usable stale graph");
+			}
+			if (scans.status(fixture.home().id()).isPresent()) {
+				throw helper.assertionException("shared owner job survived an alias invalidation");
+			}
+		});
+	}
+
+	/** A manual scan of a covered station clears the alias and starts a real job. */
+	@GameTest(maxTicks = 600)
+	public void manualScanOfCoveredStationClearsAlias(GameTestHelper helper) {
+		Fixture fixture = buildFixture(helper, "aliasmanual");
+		ScanService scans = fixture.railway().scans();
+		scans.invalidate(fixture.home().id());
+		scans.invalidate(fixture.mine().id());
+		fixture.railway().startScansFor(List.of(fixture.home(), fixture.mine()));
+
+		helper.succeedWhen(() -> {
+			ScanService.Status mineStatus = scans.status(fixture.mine().id()).orElse(null);
+			if (mineStatus == null || !fixture.home().id().equals(mineStatus.coveredBy())) {
+				throw helper.assertionException("startup did not share the component graph");
+			}
+			String ownerJob = mineStatus.jobId();
+			ScanService.StartResult result = scans.start(fixture.mine(), fixture.level(),
+					fixture.railway().config(), fixture.railway().server().getTickCount(),
+					fixture.railway().state().revision());
+			if (!(result instanceof ScanService.StartResult.Started)) {
+				throw helper.assertionException("manual scan of a covered station was rejected: " + result);
+			}
+			ScanService.Status ownStatus = scans.status(fixture.mine().id()).orElse(null);
+			if (ownStatus == null || ownStatus.coveredBy() != null || !ownStatus.running()
+					|| ownStatus.jobId().equals(ownerJob)) {
+				throw helper.assertionException("manual scan did not replace the shared alias");
+			}
+			if (scans.graph(fixture.home().id()) == null) {
+				throw helper.assertionException("manual scan of a covered station dropped the owner graph");
 			}
 		});
 	}
@@ -603,6 +722,27 @@ public final class RailwayGameTests implements CustomTestMethodInvoker {
 		if (scans.graph(station.id()) == null) {
 			helper.fail("scan failed for " + station.id() + ": " + scans.failure(station.id()));
 		}
+	}
+
+	/** Builds a disconnected rail line and registers one anchored station on it. */
+	private static Station buildIsolatedStation(GameTestHelper helper, Railway railway, String suffix) {
+		int z = 4;
+		BlockState rail = Blocks.RAIL.defaultBlockState().setValue(RailBlock.SHAPE, RailShape.EAST_WEST);
+		for (int x = 0; x <= LINE_END; x++) {
+			helper.setBlock(new BlockPos(x, 0, z), Blocks.STONE);
+			helper.setBlock(new BlockPos(x, 1, z), Blocks.AIR);
+			helper.getLevel().setBlock(helper.absolutePos(new BlockPos(x, 1, z)), rail, 2);
+		}
+		helper.setBlock(new BlockPos(HOME_DOCK, 0, z + 2), Blocks.STONE);
+		helper.setBlock(new BlockPos(HOME_DOCK, 1, z + 2), Blocks.AIR);
+		helper.setBlock(new BlockPos(HOME_DOCK, 2, z + 2), Blocks.AIR);
+		String unique = Long.toString(System.nanoTime() & 0xFFFFFFL, 36) + suffix;
+		Station station = new Station(new StationId("gtiso" + unique),
+				"Game Test Isolated " + unique, RailWorld.dimension(helper.getLevel()),
+				absolute(helper, HOME_DOCK, 1, z), absolute(helper, HOME_DOCK, 1, z + 2),
+				0.0F, true, railway.state().nextRevision());
+		railway.state().addStation(station);
+		return station;
 	}
 
 	private static void buildLine(GameTestHelper helper) {

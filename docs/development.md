@@ -71,9 +71,13 @@ signs, and buttons; service carts are ordinary minecarts with Railway tags.
 - Scans are tick-batched; a scan does not generate chunks.
 - Routes and graphs are derived caches; state holds stations, bindings, markers,
   and checkpoints, not full route plans. Graphs are rebuilt without a command:
-  `Railway.startScansFor` runs once at startup for anchored stations, and
-  `ScanService.autoStart` rebuilds a missing graph from a trip launch or route
-  check. Both go through the same per-station dedup and
+  `Railway.startScansFor` queues anchored stations and `ScanService` starts them
+  one at a time, while `ScanService.autoStart` rebuilds a missing graph from a
+  trip launch or route check. A successful scan aliases every anchored station on
+  the same component, so graph lookup, route checks and diagnostics reuse one
+  graph. Aliases are invalidated with their owner (station or block
+  invalidation), and a manual scan of a covered station clears its alias. Both
+  startup and on-demand paths use the same per-station dedup and
   `ScanRetryCooldown` (200 ticks after a failure; cleared on success and by a
   manual scan/invalidation).
 - Reservations are all-or-nothing; no waiting queue.
