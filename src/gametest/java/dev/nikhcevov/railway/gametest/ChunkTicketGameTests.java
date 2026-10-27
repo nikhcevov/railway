@@ -9,6 +9,8 @@ import dev.nikhcevov.railway.domain.TripId;
 import dev.nikhcevov.railway.minecraft.ChunkTicketManager;
 import dev.nikhcevov.railway.minecraft.RailWorld;
 import dev.nikhcevov.railway.minecraft.Railway;
+import dev.nikhcevov.railway.minecraft.ScanService;
+import dev.nikhcevov.railway.minecraft.ScanTicketSelection;
 import dev.nikhcevov.railway.network.GraphRoutePlan;
 import dev.nikhcevov.railway.network.RailPort;
 import dev.nikhcevov.railway.network.RailShapeType;
@@ -25,6 +27,9 @@ import net.minecraft.world.level.block.RailBlock;
 import net.minecraft.world.level.block.state.properties.RailShape;
 
 import java.lang.reflect.Method;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 
@@ -215,6 +220,222 @@ public final class ChunkTicketGameTests implements CustomTestMethodInvoker {
 		}
 		tickets.releaseScan("gt-scan");
 		helper.succeed();
+	}
+
+	/**
+	 * A frontier wider than the per-scan cap is processed in bounded subsets: the
+	 * selector never returns more than {@link ScanService#MAX_SCAN_TICKETS}, is
+	 * deterministic, keeps real (loaded) frontier chunks, and successive subsets
+	 * cover every pending chunk. The selected real chunks can then be ticketed.
+	 */
+	@GameTest(maxTicks = 40)
+	public void scanFrontierOverTheCapIsProcessedInBoundedSubsets(GameTestHelper helper) {
+		ChunkTicketManager tickets = Railway.get().tickets();
+		ServerLevel level = helper.getLevel();
+		List<ChunkWindow.Key> real = loadedChunks(helper, level, 2);
+		Set<ChunkWindow.Key> loaded = new LinkedHashSet<>(real);
+		Set<ChunkWindow.Key> pending = new LinkedHashSet<>(real);
+		ChunkWindow.Key base = real.getFirst();
+		for (int i = 0; i < 38; i++) {
+			// Synthetic stored frontier chunks: they only exercise the selector and
+			// are never passed to the ticket manager.
+			pending.add(new ChunkWindow.Key(base.x() + 1_000 + i, base.z() + i % 3));
+		}
+		if (pending.size() != 40) {
+			throw helper.assertionException("test frontier is not 40 chunks: " + pending.size());
+		}
+
+		ScanTicketSelection.Selection selection = ScanTicketSelection.select(
+				Set.of(), pending, loaded, ScanService.MAX_SCAN_TICKETS);
+		if (selection.overflow()) {
+			throw helper.assertionException("selector reported overflow for a wide frontier");
+		}
+		if (selection.keys().size() != ScanService.MAX_SCAN_TICKETS) {
+			throw helper.assertionException("selector did not fill the scan cap: "
+					+ selection.keys().size());
+		}
+		if (!selection.keys().containsAll(real)) {
+			throw helper.assertionException("selector dropped a real loaded frontier chunk");
+		}
+		if (!selection.keys().equals(ScanTicketSelection.select(
+				Set.of(), pending, loaded, ScanService.MAX_SCAN_TICKETS).keys())) {
+			throw helper.assertionException("selector is not deterministic");
+		}
+
+		// Draining simulation: chunks leave the frontier once the scanner re-probes
+		// them, and every pending chunk is reached without exceeding the cap.
+		Set<ChunkWindow.Key> remaining = new LinkedHashSet<>(pending);
+		Set<ChunkWindow.Key> seen = new LinkedHashSet<>();
+		int rounds = 0;
+		while (!remaining.isEmpty()) {
+			ScanTicketSelection.Selection next = ScanTicketSelection.select(
+					Set.of(), remaining, loaded, ScanService.MAX_SCAN_TICKETS);
+			if (next.keys().isEmpty() || next.keys().size() > ScanService.MAX_SCAN_TICKETS) {
+				throw helper.assertionException("bounded subset is empty or oversized: "
+						+ next.keys().size());
+			}
+			seen.addAll(next.keys());
+			remaining.removeAll(next.keys());
+			if (++rounds > 5) {
+				throw helper.assertionException("frontier subsets made no progress");
+			}
+		}
+		if (!seen.equals(pending)) {
+			throw helper.assertionException("not every pending chunk was selected");
+		}
+
+		// The bounded subset that contains only existing chunks is accepted, so a
+		// wide frontier no longer turns into a BudgetExceeded rejection.
+		Set<ChunkWindow.Key> desired = new LinkedHashSet<>(selection.keys());
+		desired.retainAll(loaded);
+		int budget = Math.max(ScanService.MAX_SCAN_TICKETS, tickets.managedChunkCount() + desired.size());
+		ChunkTicketManager.Update update = tickets.updateScan(level, "gt-scan-wide", desired, budget);
+		if (!(update instanceof ChunkTicketManager.Update.Applied applied)
+				|| applied.tickets() != desired.size()) {
+			throw helper.assertionException("bounded scan subset was not applied: " + update);
+		}
+		tickets.releaseScan("gt-scan-wide");
+		if (tickets.scanTicketCount("gt-scan-wide") != 0) {
+			throw helper.assertionException("wide-frontier scan ticket leaked");
+		}
+		helper.succeed();
+	}
+
+	/**
+	 * Two bounded subsets are acquired in sequence: the second update releases the
+	 * first subset and takes the next one, so the job never exceeds its cap and
+	 * leaves no stale ticket behind.
+	 */
+	@GameTest(maxTicks = 40)
+	public void scanTicketSubsetsReplaceThePreviousFrontier(GameTestHelper helper) {
+		ChunkTicketManager tickets = Railway.get().tickets();
+		ServerLevel level = helper.getLevel();
+		List<ChunkWindow.Key> real = loadedChunks(helper, level, 2);
+		Set<ChunkWindow.Key> loaded = new LinkedHashSet<>(real);
+		Set<ChunkWindow.Key> pending = new LinkedHashSet<>(real);
+		String owner = "gt-scan-subsets";
+		int budget = Math.max(2, tickets.managedChunkCount() + 2);
+		ChunkTicketManager.ScanStats before = tickets.scanStats();
+
+		ScanTicketSelection.Selection first = ScanTicketSelection.select(
+				tickets.scanTicketKeys(level, owner), pending, loaded, 1);
+		if (first.keys().size() != 1) {
+			throw helper.assertionException("first subset was not exactly one chunk: " + first);
+		}
+		ChunkWindow.Key firstKey = first.keys().getFirst();
+		ChunkTicketManager.Update acquired = tickets.updateScan(level, owner, Set.of(firstKey), budget);
+		if (!(acquired instanceof ChunkTicketManager.Update.Applied applied) || applied.tickets() != 1) {
+			throw helper.assertionException("first scan subset was not acquired: " + acquired);
+		}
+
+		// The scanner re-probed the first chunk, so it left the frontier and the
+		// next subset must ticket the remaining chunk instead.
+		pending.remove(firstKey);
+		ScanTicketSelection.Selection second = ScanTicketSelection.select(
+				tickets.scanTicketKeys(level, owner), pending, loaded, 1);
+		if (second.keys().size() != 1 || second.keys().contains(firstKey)) {
+			throw helper.assertionException("second subset was not the next chunk: " + second);
+		}
+		ChunkWindow.Key secondKey = second.keys().getFirst();
+		ChunkTicketManager.Update replaced = tickets.updateScan(level, owner, Set.of(secondKey), budget);
+		if (!(replaced instanceof ChunkTicketManager.Update.Applied replacedApplied)
+				|| replacedApplied.tickets() != 1) {
+			throw helper.assertionException("second scan subset was not acquired: " + replaced);
+		}
+		if (tickets.scanTicketCount(owner) != 1
+				|| !tickets.scanTicketKeys(level, owner).equals(Set.of(secondKey))) {
+			throw helper.assertionException("previous scan subset was not released: "
+					+ tickets.scanTicketKeys(level, owner));
+		}
+		ChunkTicketManager.ScanStats after = tickets.scanStats();
+		if (after.acquisitions() < before.acquisitions() + 2
+				|| after.releases() < before.releases() + 1) {
+			throw helper.assertionException("subset acquire/release was not counted: " + after
+					+ " (before " + before + ")");
+		}
+		if (tickets.managedChunkCount() > budget) {
+			throw helper.assertionException("scan subset exceeded the shared budget");
+		}
+
+		tickets.releaseScan(owner);
+		if (tickets.scanTicketCount(owner) != 0) {
+			throw helper.assertionException("released scan subset leaked");
+		}
+		helper.succeed();
+	}
+
+	/**
+	 * A scan update that only refreshes chunks the job already holds does not grow
+	 * the shared count, so it is applied even when other owners have filled the
+	 * budget. Any set that would acquire a new chunk is still rejected atomically.
+	 */
+	@GameTest(maxTicks = 40)
+	public void refreshOnlyScanUpdateDoesNotConsumeSharedBudget(GameTestHelper helper) {
+		ChunkTicketManager tickets = Railway.get().tickets();
+		ServerLevel level = helper.getLevel();
+		List<ChunkWindow.Key> real = loadedChunks(helper, level, 2);
+		ChunkWindow.Key first = real.getFirst();
+		ChunkWindow.Key second = real.get(1);
+		String owner = "gt-scan-refresh";
+		String other = "gt-scan-refresh-b";
+		int budget = Math.max(2, tickets.managedChunkCount() + 2);
+		ChunkTicketManager.Update acquired = tickets.updateScan(level, owner, Set.of(first), budget);
+		if (!(acquired instanceof ChunkTicketManager.Update.Applied applied) || applied.tickets() != 1) {
+			throw helper.assertionException("scan chunk was not acquired: " + acquired);
+		}
+		ChunkTicketManager.Update acquiredOther = tickets.updateScan(level, other, Set.of(second), budget);
+		if (!(acquiredOther instanceof ChunkTicketManager.Update.Applied otherApplied)
+				|| otherApplied.tickets() != 1) {
+			throw helper.assertionException("second scan chunk was not acquired: " + acquiredOther);
+		}
+
+		int managed = tickets.managedChunkCount();
+		int tight = Math.max(1, managed - 1);
+		ChunkTicketManager.Update refresh = tickets.updateScan(level, owner, Set.of(first), tight);
+		if (!(refresh instanceof ChunkTicketManager.Update.Applied refreshed)
+				|| refreshed.tickets() != 1) {
+			throw helper.assertionException("refresh-only scan update was rejected: " + refresh);
+		}
+		if (tickets.managedChunkCount() != managed) {
+			throw helper.assertionException("refresh-only scan update changed the managed count");
+		}
+		ChunkTicketManager.Update grew = tickets.updateScan(level, owner, Set.of(first, second), tight);
+		if (!(grew instanceof ChunkTicketManager.Update.BudgetExceeded)) {
+			throw helper.assertionException("oversized scan desired set was not rejected: " + grew);
+		}
+		if (!tickets.scanTicketKeys(level, owner).equals(Set.of(first))) {
+			throw helper.assertionException("rejected update changed the held scan set: "
+					+ tickets.scanTicketKeys(level, owner));
+		}
+
+		tickets.releaseScan(owner);
+		tickets.releaseScan(other);
+		helper.succeed();
+	}
+
+	/** Deterministic list of already loaded chunks around the test plot. */
+	private static List<ChunkWindow.Key> loadedChunks(GameTestHelper helper, ServerLevel level,
+			int count) {
+		ChunkWindow.Key origin = ChunkWindow.Key.of(
+				RailWorld.loc(helper.absolutePos(new BlockPos(0, 1, 0))));
+		Set<ChunkWindow.Key> found = new LinkedHashSet<>();
+		for (int radius = 0; radius <= 3 && found.size() < count; radius++) {
+			for (int dx = -radius; dx <= radius; dx++) {
+				for (int dz = -radius; dz <= radius; dz++) {
+					ChunkWindow.Key key = new ChunkWindow.Key(origin.x() + dx, origin.z() + dz);
+					if (level.getChunkSource().hasChunk(key.x(), key.z())) {
+						found.add(key);
+					}
+				}
+			}
+		}
+		List<ChunkWindow.Key> keys = new ArrayList<>(found);
+		keys.sort(Comparator.comparingInt(ChunkWindow.Key::x).thenComparingInt(ChunkWindow.Key::z));
+		if (keys.size() < count) {
+			throw helper.assertionException("only " + keys.size()
+					+ " loaded chunk(s) near the test plot; " + count + " needed");
+		}
+		return keys.subList(0, count);
 	}
 
 	@Override

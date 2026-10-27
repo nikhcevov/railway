@@ -79,15 +79,21 @@ public final class ScanService {
 		final ScanView view;
 		final int railsPerTick;
 		final long budgetNanos;
+		/** Per-scan ticket cap: {@code min(maxManagedChunkTickets, MAX_SCAN_TICKETS)}. */
 		final int ticketBudget;
+		/** Global ticket budget shared with trips and recovery. */
+		final int sharedTicketBudget;
 		final long startedTick;
 		final long revision;
 		GraphScanner scanner;
 		RailGraph graph;
 		Failure failure;
+		/** Suppresses repeated shared-budget warnings while the job waits. */
+		boolean budgetBlocked;
 
 		Job(String id, StationId station, ServerLevel level, ScanView view, int railsPerTick,
-				long budgetNanos, int ticketBudget, long startedTick, long revision) {
+				long budgetNanos, int ticketBudget, int sharedTicketBudget, long startedTick,
+				long revision) {
 			this.id = id;
 			this.station = station;
 			this.level = level;
@@ -95,6 +101,7 @@ public final class ScanService {
 			this.railsPerTick = railsPerTick;
 			this.budgetNanos = budgetNanos;
 			this.ticketBudget = ticketBudget;
+			this.sharedTicketBudget = sharedTicketBudget;
 			this.startedTick = startedTick;
 			this.revision = revision;
 		}
@@ -218,7 +225,8 @@ public final class ScanService {
 		ScanView view = new ScanView(level, logger);
 		Job job = new Job(jobId, station.id(), level, view, config.scanRailsPerTick(),
 				Math.max(1, config.scanTimeBudgetMs()) * 1_000_000L,
-				Math.min(config.maxManagedChunkTickets(), MAX_SCAN_TICKETS), tick, revision);
+				Math.min(config.maxManagedChunkTickets(), MAX_SCAN_TICKETS),
+				Math.max(0, config.maxManagedChunkTickets()), tick, revision);
 		job.scanner = new GraphScanner(
 				station.dimension(),
 				station.dock(),
@@ -388,39 +396,82 @@ public final class ScanService {
 	}
 
 	/**
-	 * Requests loading tickets for the unloaded frontier chunks that exist on
-	 * disk, and releases tickets for chunks that left the frontier. Missing
-	 * chunks are not ticketed; {@link ScanView} reports them as empty instead.
+	 * Requests loading tickets for a bounded, deterministic subset of the unloaded
+	 * frontier chunks that exist on disk, and releases tickets for chunks that
+	 * left the frontier. Missing chunks are not ticketed; {@link ScanView} reports
+	 * them as empty instead.
+	 *
+	 * <p>The frontier may be wider than the per-job cap. Instead of failing, each
+	 * tick tickets at most {@code job.ticketBudget} chunks: first the chunks the
+	 * job already holds, then loaded chunks, then stored unloaded chunks in
+	 * coordinate order. A chunk leaves the held set only after the scanner
+	 * re-probed it, which frees budget for the next subset, so a wide or
+	 * branching component is scanned in successive bounded subsets and every
+	 * pending chunk is eventually selected.
 	 */
 	private void reconcileScanChunks(Job job) {
-		if (job.ticketBudget <= 0 && job.scanner.isWaiting()) {
-			job.scanner.abort(Failure.detail(FailureCode.CHUNKS_NOT_READY,
-					"maxManagedChunkTickets is 0; the scan cannot load unloaded chunks"));
+		Set<ChunkWindow.Key> held = tickets.scanTicketKeys(job.level, job.id);
+		ScanTicketSelection.Frontier frontier = ScanTicketSelection.classify(
+				job.scanner.pendingPositions(), held,
+				key -> job.level.getChunkSource().hasChunk(key.x(), key.z()),
+				job.view::storageState);
+		for (ChunkWindow.Key key : frontier.toProbe()) {
+			job.view.probeStorage(key);
+		}
+		if (job.ticketBudget <= 0) {
+			// Loaded frontier chunks are readable without a ticket; only a frontier
+			// that still needs a chunk load makes a zero budget fatal.
+			if (!frontier.toProbe().isEmpty()
+					|| frontier.pending().size() > frontier.loaded().size()) {
+				job.scanner.abort(Failure.detail(FailureCode.CHUNKS_NOT_READY,
+						"maxManagedChunkTickets is 0; the scan cannot load unloaded chunks"));
+			}
 			return;
 		}
-		Set<ChunkWindow.Key> desired = new LinkedHashSet<>();
-		for (BlockLocation pos : job.scanner.pendingPositions()) {
-			ChunkWindow.Key key = ChunkWindow.Key.of(pos);
-			if (!job.level.getChunkSource().hasChunk(key.x(), key.z())) {
-				Boolean onDisk = job.view.storageState(key);
-				if (Boolean.FALSE.equals(onDisk)) {
-					continue;
-				}
-				if (onDisk == null) {
-					job.view.probeStorage(key);
-					continue;
-				}
-			}
-			// Keep a chunk that just loaded ticketed until the scanner actually
-			// re-probes it, so a ticket release cannot unload it under the scan.
-			desired.add(key);
+		ScanTicketSelection.Selection selection = ScanTicketSelection.select(
+				held, frontier.pending(), frontier.loaded(), job.ticketBudget);
+		if (selection.overflow()) {
+			job.scanner.abort(Failure.detail(FailureCode.INTERNAL,
+					"scan holds " + held.size() + " chunk ticket(s) for a budget of "
+							+ job.ticketBudget));
+			return;
 		}
-		ChunkTicketManager.Update update = tickets.updateScan(job.level, job.id, desired, job.ticketBudget);
-		if (update instanceof ChunkTicketManager.Update.BudgetExceeded exceeded) {
-			job.scanner.abort(Failure.detail(FailureCode.CHUNKS_NOT_READY,
-					"scan chunk ticket budget " + exceeded.budget() + " exceeded (needs "
-							+ exceeded.requested() + ")"));
+		// The manager's projection accounts for the chunks this update releases and
+		// for chunks other owners already hold, so the subset is applied atomically
+		// whenever the global budget can fit it. The per-scan cap above stays
+		// separate from that shared limit.
+		Set<ChunkWindow.Key> desired = new LinkedHashSet<>(selection.keys());
+		ChunkTicketManager.Update update = tickets.updateScan(job.level, job.id, desired,
+				job.sharedTicketBudget);
+		if (update instanceof ChunkTicketManager.Update.BudgetExceeded) {
+			// Trips, recovery or other scans use the shared budget right now. Release
+			// the chunks this job no longer needs (a refresh-only set never grows the
+			// shared count), then wait for a free slot. The scanner's chunk wait
+			// timeout bounds this; no retry loop is started here.
+			Set<ChunkWindow.Key> retained = new LinkedHashSet<>(held);
+			retained.retainAll(frontier.pending());
+			tickets.updateScan(job.level, job.id, retained, job.sharedTicketBudget);
+			warnBudgetBlocked(job, "the shared ticket budget of " + job.sharedTicketBudget
+					+ " cannot fit " + desired.size() + " frontier chunk(s) ("
+					+ tickets.managedChunkCount() + " in use)");
+			return;
 		}
+		job.budgetBlocked = false;
+	}
+
+	/**
+	 * Reports shared-budget starvation once per episode. The ticket budget is a
+	 * hard cap, so waiting on a genuine lack of slots is correct; the scanner's
+	 * chunk wait timeout is what turns a persistent shortage into a clear
+	 * {@link FailureCode#CHUNKS_NOT_READY} failure.
+	 */
+	private void warnBudgetBlocked(Job job, String detail) {
+		if (job.budgetBlocked) {
+			return;
+		}
+		job.budgetBlocked = true;
+		logger.warn("Scan {} for station {} cannot ticket its chunk frontier: {}",
+				job.id, job.station, detail);
 	}
 
 	private void complete(Job job, long tick) {

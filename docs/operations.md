@@ -90,9 +90,13 @@ command:
   200 ticks (10 seconds). A successful scan or an invalidation clears the delay,
   and `/rail network scan <station>` bypasses it. The last failure remains
   visible in `/rail network status` and `/rail diagnostics`;
-- if `maxManagedChunkTickets` is 0 or the shared budget cannot fit the frontier,
-  the job fails with `CHUNKS_NOT_READY`; startup, trips and other stations are
-  unaffected.
+- a wide or branching component whose unloaded frontier is larger than the
+  32-ticket scan cap does not fail: the job loads the frontier in bounded
+  subsets (see below). Only a zero ticket budget, a frontier that stays
+  unreadable after the chunk wait timeout, or a shared budget permanently used by
+  other owners ends the job with `CHUNKS_NOT_READY`; a chunk missing from level
+  storage counts as empty and is never ticketed. Startup, trips and other
+  stations are unaffected.
 
 ### Scan-time chunk loading
 
@@ -107,8 +111,16 @@ failing with `SCAN_INCOMPLETE`:
 - the ticket is server-only, non-persistent and loading-only (no simulation),
   with radius 0;
 - scan tickets share `maxManagedChunkTickets` with trip and recovery tickets and
-  are additionally capped at 32; a frontier that cannot fit the budget fails with
-  `CHUNKS_NOT_READY` instead of planning a partial graph;
+  are additionally capped at 32 per job;
+- a frontier wider than that cap is ticketed in successive bounded, deterministic
+  subsets instead of failing: every tick the job keeps the chunks it already
+  holds, then prefers loaded frontier chunks, then stored unloaded chunks in
+  chunk-coordinate order, up to 32. A chunk leaves the held set only after the
+  scanner re-probed it, so a ticket release cannot unload it under the scan and
+  the next subset can take its place. No chunk is generated and every pending
+  frontier chunk is eventually selected. New chunks must also fit the remaining
+  part of the shared budget; when trips, recovery or other scans occupy all of
+  it, the scan does not pretend the frontier was requested and waits for a slot;
 - the scan retries the blocked frontier every tick and keeps discovering loaded
   neighbours meanwhile;
 - after 200 consecutive ticks on the same unresolved chunk set the scan fails with
@@ -116,11 +128,12 @@ failing with `SCAN_INCOMPLETE`:
 - tickets are also released on completion, failure, scan invalidation/clear and
   shutdown; ticket timeouts (200 ticks) are a final safety net for crashes.
 
-Resource bounds: a scan holds at most the frontier chunks around its blocked
-positions (in practice one or two), not a route-length window. Long routes are
-thus scanned incrementally; the number of loaded chunks does not grow with route
-length. With `maxManagedChunkTickets: 0` a scan cannot leave the naturally loaded
-area and fails with `CHUNKS_NOT_READY`.
+Resource bounds: a scan holds at most 32 frontier chunks at a time and never the
+whole route, so a long or widely branching component is scanned in bounded
+subsets and the number of loaded chunks does not grow with route length. A
+frontier of N pending chunks needs about `ceil(N / 32)` subset rotations, each
+waiting for its chunks to load and be re-probed. With `maxManagedChunkTickets: 0`
+a scan cannot leave the naturally loaded area and fails with `CHUNKS_NOT_READY`.
 
 Limitation: strict storage probing controls which chunks Railway tickets. Vanilla
 chunk loading still computes the neighbors a chunk's status requires, so loading

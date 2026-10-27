@@ -84,8 +84,9 @@ no version bump was required.
   still prevent conflicting trips.
 - `maxManagedChunkTickets` is a global ticket budget shared by trip windows,
   recovery checkpoints and scan frontiers, not a route-length limit. Scan tickets
-  are additionally capped at 32. Larger values allow more parallel windows. With
-  `0`, scans cannot load unloaded frontier chunks and fail with
+  are additionally capped at 32 per scan job, and a wider frontier is ticketed in
+  bounded subsets rather than failing. Larger values allow more parallel windows.
+  With `0`, scans cannot load unloaded frontier chunks and fail with
   `CHUNKS_NOT_READY`; startup and other stations keep running, and the automatic
   scan retry waits 10 seconds (200 ticks, not configurable) after a failure.
 - `maxTripTicks` is a safety net. A cart that fails to finish within this many

@@ -270,7 +270,14 @@ public final class ChunkTicketManager {
 	/**
 	 * Reconciles a scan job's tickets with the chunks of its current unloaded
 	 * frontier. The caller must pass only chunks confirmed present in level
-	 * storage and not loaded yet; this method only makes existing chunks readable.
+	 * storage and not loaded yet, and should pass only the bounded subset it
+	 * selected for this tick; this method only makes existing chunks readable.
+	 *
+	 * <p>The update is atomic: when the desired set cannot fit the budget, no
+	 * part of it is acquired. A desired set larger than {@code budget} is always
+	 * rejected. A set that only refreshes chunks the job already holds is applied
+	 * even when other owners have filled the shared budget, because it does not
+	 * grow the managed chunk count.
 	 *
 	 * @param budget shared managed-ticket limit, {@code <= 0} disables tickets
 	 * @return how many frontier chunks the job currently holds
@@ -289,8 +296,18 @@ public final class ChunkTicketManager {
 		// in diagnostics as an owner.
 		ScanState existing = scans.get(owner);
 		Set<ChunkWindow.Key> held = existing == null || existing.level != level ? Set.of() : existing.held;
+		// Only new chunks grow the shared count; refreshing chunks the job already
+		// holds keeps them alive without consuming budget another owner could use.
+		// A desired set larger than the budget is still rejected atomically.
+		boolean acquires = false;
+		for (ChunkWindow.Key key : desiredSet) {
+			if (!held.contains(key)) {
+				acquires = true;
+				break;
+			}
+		}
 		int projected = projectedScanTicketCount(held, desiredSet);
-		if (desiredSet.size() > budget || projected > budget) {
+		if (desiredSet.size() > budget || (acquires && projected > budget)) {
 			logger.warn("Scan {} needs {} chunk ticket(s), shared budget is {} ({} in use)",
 					owner, desiredSet.size(), budget, managedChunkCount());
 			return new Update.BudgetExceeded(Math.max(desiredSet.size(), projected), budget);
@@ -353,6 +370,19 @@ public final class ChunkTicketManager {
 	public int scanTicketCount(String owner) {
 		ScanState state = scans.get(owner);
 		return state == null ? 0 : state.held.size();
+	}
+
+	/**
+	 * Chunks one scan owner holds on this level; empty when it holds none or its
+	 * tickets belong to a previous level. Lets the scan caller keep the frontier
+	 * chunks it already ticketed before selecting the next bounded subset.
+	 */
+	public Set<ChunkWindow.Key> scanTicketKeys(ServerLevel level, String owner) {
+		ScanState state = scans.get(owner);
+		if (state == null || state.level != level) {
+			return Set.of();
+		}
+		return Set.copyOf(state.held);
 	}
 
 	public ScanStats scanStats() {

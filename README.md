@@ -177,9 +177,11 @@ is fixed and `/rail reload` or a restart succeeds. See
 - Chunk tickets keep only the current local window and braking window ready; the
   whole route is not force-loaded.
 - A scan pauses at unloaded rail chunks and loads only existing saved frontier
-  chunks (bounded, shared ticket budget); it never plans from unloaded data. If
-  the budget is exhausted or ticket budget is 0, that scan fails with
-  `CHUNKS_NOT_READY` instead of crashing or planning a partial graph.
+  chunks (bounded, shared ticket budget); it never plans from unloaded data. A
+  frontier wider than the 32-ticket scan cap is loaded in deterministic bounded
+  subsets, so wide or branching components still scan. Only a zero ticket budget,
+  a genuinely unloadable frontier, or a shared budget permanently taken by trips
+  and other scans fails with `CHUNKS_NOT_READY`, never a partial graph.
 - Scans are derived caches: they auto-start after restart and on demand, so no
   manual `/rail network scan` is needed. Startup scans run one at a time and
   share their graph with every station on the same component; a failed automatic

@@ -111,7 +111,9 @@ Add unit tests for:
 - reservation/quarantine semantics;
 - config validation and migration;
 - recovery decisions and diagnostic summaries;
-- scan retry cooldown boundaries and per-station isolation.
+- scan retry cooldown boundaries and per-station isolation;
+- scan frontier ticket selection: cap, held/loaded priority, determinism, zero
+  budget, missing chunks, and that successive subsets cover the whole frontier.
 
 ### GameTests (`src/gametest/java`)
 
@@ -119,8 +121,8 @@ Server integration tests using Fabric GameTest and a real Minecraft server:
 
 - straight, curve/slope, turnout, parallel, speed, boarding/dismount, broken path;
 - sign bootstrap, chain/local/main, ordinary signs, permissions, break lifecycle;
-- chunk ticket lifecycle/readiness, recovery present/absent/occupied carts, late
-  chunk cleanup;
+- chunk ticket lifecycle/readiness, bounded scan-frontier subsets across more
+  than 32 chunks, recovery present/absent/occupied carts, late chunk cleanup;
 - automatic startup and on-demand scans (missing graph starts a scan and the
   retry succeeds after completion; provisional stations are skipped);
 - diagnostics.

@@ -111,9 +111,11 @@ that alias and starts a real job for the station.
 
 A manual scan bypasses the automatic retry delay. After a failed automatic scan,
 further automatic attempts for that station wait 10 seconds (200 ticks); a
-successful scan clears the delay. With `maxManagedChunkTickets: 0`, or when the
-shared ticket budget cannot load the scan frontier, the job fails with
-`CHUNKS_NOT_READY` instead of loading a partial graph.
+successful scan clears the delay. A frontier wider than the 32-ticket scan cap is
+loaded in bounded subsets, so a wide or branching component is scanned instead of
+being rejected. With `maxManagedChunkTickets: 0`, or when the frontier's chunks
+are missing or the shared ticket budget stays fully used by trips and other
+scans, the job fails with `CHUNKS_NOT_READY` instead of loading a partial graph.
 
 ### `/rail network status [station]`
 
