@@ -147,6 +147,7 @@ public final class ScanService {
 	private final Map<StationId, Job> jobs = new LinkedHashMap<>();
 	private final Logger logger;
 	private final ChunkTicketManager tickets;
+	private final ScanRetryCooldown retry = new ScanRetryCooldown();
 	private long nextJobId = 1;
 
 	public ScanService(Logger logger, ChunkTicketManager tickets) {
@@ -190,7 +191,47 @@ public final class ScanService {
 		return new StartResult.Started(jobId);
 	}
 
+	/**
+	 * Starts a background scan when an automatic consumer (a trip launch or a
+	 * route check) needs a graph that does not exist yet. Unlike the manual
+	 * command this honours {@link ScanRetryCooldown}, so a failed geometry scan
+	 * is not restarted on every button press.
+	 *
+	 * <p>The caller must only use this when {@link #graph(StationId)} is null;
+	 * a running job is never duplicated.
+	 *
+	 * @return {@link StartResult.Started} when a new scan was launched, otherwise
+	 *         the failure to report to the caller
+	 */
+	public StartResult autoStart(Station station, ServerLevel level, Config config, long tick, long revision) {
+		StationId id = station.id();
+		if (isRunning(id)) {
+			return new StartResult.Rejected(Failure.detail(FailureCode.SCAN_RUNNING, id.value()));
+		}
+		if (!retry.allows(id, tick)) {
+			Failure previous = failure(id);
+			return new StartResult.Rejected(previous != null ? previous
+					: Failure.detail(FailureCode.SCAN_INCOMPLETE, id.value()));
+		}
+		StartResult result = start(station, level, config, tick, revision);
+		if (result instanceof StartResult.Started) {
+			retry.recordAttempt(id, tick);
+			logger.info("Started automatic scan for station {} at tick {}", id.value(), tick);
+		}
+		return result;
+	}
+
+	/**
+	 * Failure reported when an automatic scan was just launched for this attempt.
+	 * The scan runs in the background; the player only needs to try again later.
+	 */
+	public static Failure autoStartedFailure(StationId station) {
+		return Failure.detail(FailureCode.SCAN_RUNNING,
+				station.value() + " (scan started automatically)");
+	}
+
 	public void tick(MinecraftServer server) {
+		long tick = server.getTickCount();
 		for (Job job : List.copyOf(jobs.values())) {
 			if (job.scanner.isFinished()) {
 				continue;
@@ -201,7 +242,7 @@ public final class ScanService {
 				reconcileScanChunks(job);
 			}
 			if (job.scanner.isFinished()) {
-				complete(job);
+				complete(job, tick);
 			}
 		}
 	}
@@ -242,16 +283,20 @@ public final class ScanService {
 		}
 	}
 
-	private void complete(Job job) {
+	private void complete(Job job, long tick) {
 		tickets.releaseScan(job.id);
 		job.view.close();
 		if (job.scanner.isFailed()) {
 			job.failure = job.scanner.failure();
+			// Keep a failed geometry scan from being restarted by every button
+			// press; a manual `/rail network scan` still bypasses the cooldown.
+			retry.recordFailure(job.station, tick);
 			logger.warn("Scan {} for station {} failed: {} at {}{}", job.id, job.station,
 					job.failure.code(), job.failure.location() == null ? "-" : job.failure.location().shortString(),
 					job.failure.detail() == null ? "" : ": " + job.failure.detail());
 		} else {
 			job.graph = job.scanner.graph();
+			retry.clear(job.station);
 			logger.info("Scan {} for station {} complete: {} rails, {} switches",
 					job.id, job.station, job.graph.rails().size(), job.graph.switches().size());
 		}
@@ -311,6 +356,7 @@ public final class ScanService {
 		if (job != null) {
 			discard(job);
 		}
+		retry.clear(station);
 	}
 
 	public void invalidate(BlockLocation location) {
@@ -328,5 +374,6 @@ public final class ScanService {
 			discard(job);
 		}
 		jobs.clear();
+		retry.clear();
 	}
 }

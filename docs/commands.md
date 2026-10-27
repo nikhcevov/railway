@@ -100,9 +100,17 @@ updated together.
 
 ### `/rail network scan <station>`
 
-Starts a tick-batched scan from the station main dock. Returns a job ID.
-Scanning is required before route checks or trips; scans are not persisted across
-restarts.
+Starts a tick-batched scan from the station main dock and returns a job ID. This
+is a manual forced rescan and diagnostics tool; it is not required before route
+checks or trips. Scans are derived caches, never persisted: after a restart every
+anchored station in a loaded dimension is scanned automatically, and a missing
+graph is also built on demand by a trip launch or `/rail route check`.
+
+A manual scan bypasses the automatic retry delay. After a failed automatic scan,
+further automatic attempts for that station wait 10 seconds (200 ticks); a
+successful scan clears the delay. With `maxManagedChunkTickets: 0`, or when the
+shared ticket budget cannot load the scan frontier, the job fails with
+`CHUNKS_NOT_READY` instead of loading a partial graph.
 
 ### `/rail network status [station]`
 
@@ -169,8 +177,11 @@ Do not use commands for this in normal play:
 [Railway] Garden Home + stone button
 ```
 
-Save both signs after placing buttons. Run `/rail network scan home` if a scan is
-not already complete. Press the Home/Garden button.
+Save both signs after placing buttons. Scanning starts automatically; press the
+Home/Garden button. If the very first press arrives before the scan completes it
+is rejected with `SCAN_RUNNING` and the scan is started automatically, so press
+again shortly. `/rail network scan home` is only needed to force a rescan after
+editing rails without breaking a relevant block.
 
 ### Manual command route
 
@@ -186,9 +197,12 @@ not already complete. Press the Home/Garden button.
 /rail button bind home mine
 /rail button bind mine home
 
-/rail network scan home
 /rail route check home mine
 ```
+
+The first route check also starts the missing scans automatically and may report
+`SCAN_RUNNING`; run it again when the scan completes. `/rail network scan home`
+remains available to force a rescan and wait for a job ID.
 
 ### Inspect a problem
 
@@ -208,7 +222,7 @@ not already complete. Press the Home/Garden button.
 | `STATION_INCOMPLETE` | Set a safe exit and enable; provisional must be anchored by a sign |
 | `STATION_DISABLED` | Enable the station; abort active trips first |
 | `DESTINATION_NOT_ANCHORED` | Build/save the destination's return sign |
-| `SCAN_INCOMPLETE` / `SCAN_RUNNING` | Run `/rail network scan <station>` and wait |
+| `SCAN_INCOMPLETE` / `SCAN_RUNNING` | Scans start automatically; wait and retry. Use `/rail network status <station>` to monitor, or `/rail network scan <station>` to force a rescan |
 | `SCAN_FAILED` / `NO_RAIL` / `UNSUPPORTED_*` | Inspect report and rail geometry |
 | `DOCK_NOT_ON_LINE` / `NO_PATH` | Dock/graph mismatch or disconnected network |
 | `BUTTON_REPLACED` | Re-register the button/sign; the block was replaced |

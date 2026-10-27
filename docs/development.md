@@ -70,7 +70,12 @@ signs, and buttons; service carts are ordinary minecarts with Railway tags.
 - All world/state access is on the server thread.
 - Scans are tick-batched; a scan does not generate chunks.
 - Routes and graphs are derived caches; state holds stations, bindings, markers,
-  and checkpoints, not full route plans.
+  and checkpoints, not full route plans. Graphs are rebuilt without a command:
+  `Railway.startScansFor` runs once at startup for anchored stations, and
+  `ScanService.autoStart` rebuilds a missing graph from a trip launch or route
+  check. Both go through the same per-station dedup and
+  `ScanRetryCooldown` (200 ticks after a failure; cleared on success and by a
+  manual scan/invalidation).
 - Reservations are all-or-nothing; no waiting queue.
 - Service carts are tagged `railway_managed` and trip-tagged. Never treat an
   arbitrary cart as managed.
@@ -101,7 +106,8 @@ Add unit tests for:
 - route planning and resource derivation;
 - reservation/quarantine semantics;
 - config validation and migration;
-- recovery decisions and diagnostic summaries.
+- recovery decisions and diagnostic summaries;
+- scan retry cooldown boundaries and per-station isolation.
 
 ### GameTests (`src/gametest/java`)
 
@@ -111,6 +117,8 @@ Server integration tests using Fabric GameTest and a real Minecraft server:
 - sign bootstrap, chain/local/main, ordinary signs, permissions, break lifecycle;
 - chunk ticket lifecycle/readiness, recovery present/absent/occupied carts, late
   chunk cleanup;
+- automatic startup and on-demand scans (missing graph starts a scan and the
+  retry succeeds after completion; provisional stations are skipped);
 - diagnostics.
 
 GameTests should exercise the same hooks as production (for example

@@ -146,6 +146,11 @@ registered button.
 Service signs are the normal construction path. The command path remains available
 for administration and migration. See [`docs/commands.md`](docs/commands.md).
 
+Graph scans start automatically: after a server restart every anchored station in
+a loaded dimension is scanned in the background, and a trip launch or
+`/rail route check` starts the missing scan on demand. `/rail network scan` is
+only a manual forced rescan/diagnostic tool and is never required before a trip.
+
 ## Configuration
 
 Config lives at `config/railway.json`. Important defaults:
@@ -170,7 +175,12 @@ is fixed and `/rail reload` or a restart succeeds. See
 - Chunk tickets keep only the current local window and braking window ready; the
   whole route is not force-loaded.
 - A scan pauses at unloaded rail chunks and loads only existing saved frontier
-  chunks (bounded, shared ticket budget); it never plans from unloaded data.
+  chunks (bounded, shared ticket budget); it never plans from unloaded data. If
+  the budget is exhausted or ticket budget is 0, that scan fails with
+  `CHUNKS_NOT_READY` instead of crashing or planning a partial graph.
+- Scans are derived caches: they auto-start after restart and on demand, so no
+  manual `/rail network scan` is needed. A failed automatic scan is retried no
+  more than once per 10 seconds per station; a successful scan clears the delay.
 - On restart, persisted checkpoint carts are reconciled by UUID and safely
   removed/stopped; trips never resume automatically.
 - State is stored in `<world>/railway/state.json` (schema 4). Migrations create a

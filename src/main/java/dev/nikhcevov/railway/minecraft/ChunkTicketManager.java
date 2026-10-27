@@ -349,6 +349,12 @@ public final class ChunkTicketManager {
 		return scanReferences.size();
 	}
 
+	/** Chunks one scan owner currently holds; 0 when it holds none. */
+	public int scanTicketCount(String owner) {
+		ScanState state = scans.get(owner);
+		return state == null ? 0 : state.held.size();
+	}
+
 	public ScanStats scanStats() {
 		int tickets = 0;
 		long acquisitions = 0;

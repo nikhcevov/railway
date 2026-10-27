@@ -657,15 +657,31 @@ public final class RailCommand {
 	}
 
 	private static RailGraph graphOrFail(CommandSourceStack source, Railway railway, Station station) {
-		if (railway.scans().isRunning(station.id())) {
-			fail(source, Failure.detail(FailureCode.SCAN_RUNNING, station.id().value()));
-			return null;
-		}
-		RailGraph graph = railway.scans().graph(station.id());
+		ScanService scans = railway.scans();
+		RailGraph graph = scans.graph(station.id());
 		if (graph != null) {
 			return graph;
 		}
-		Failure failure = railway.scans().failure(station.id());
+		if (scans.isRunning(station.id())) {
+			fail(source, Failure.detail(FailureCode.SCAN_RUNNING, station.id().value()));
+			return null;
+		}
+		// No graph and no running job: rebuild the derived graph in the
+		// background so a route check after a restart needs no manual scan.
+		ServerLevel level = RailWorld.level(source.getServer(), station.dimension());
+		if (level != null) {
+			ScanService.StartResult started = scans.autoStart(station, level, railway.config(),
+					source.getServer().getTickCount(), railway.state().revision());
+			if (started instanceof ScanService.StartResult.Started) {
+				fail(source, ScanService.autoStartedFailure(station.id()));
+				return null;
+			}
+			if (started instanceof ScanService.StartResult.Rejected rejected) {
+				fail(source, rejected.failure());
+				return null;
+			}
+		}
+		Failure failure = scans.failure(station.id());
 		fail(source, failure != null ? failure : Failure.detail(FailureCode.SCAN_INCOMPLETE, station.id().value()));
 		return null;
 	}

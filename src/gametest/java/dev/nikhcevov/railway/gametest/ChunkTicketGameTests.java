@@ -182,6 +182,9 @@ public final class ChunkTicketGameTests implements CustomTestMethodInvoker {
 		ChunkWindow.Key origin = ChunkWindow.Key.of(
 				RailWorld.loc(helper.absolutePos(new BlockPos(0, 1, 0))));
 		ChunkWindow.Key neighbour = new ChunkWindow.Key(origin.x() + 1, origin.z());
+		// Automatic startup scans may hold unrelated tickets; every assertion is
+		// scoped to this test's owner or measured as a delta.
+		ChunkTicketManager.ScanStats before = tickets.scanStats();
 
 		// Two frontier chunks cannot fit into a one-ticket scan budget: the update
 		// is atomic, so no partial ticket is taken.
@@ -190,7 +193,7 @@ public final class ChunkTicketGameTests implements CustomTestMethodInvoker {
 		if (!(exceeded instanceof ChunkTicketManager.Update.BudgetExceeded)) {
 			throw helper.assertionException("expected a bounded scan update, got " + exceeded);
 		}
-		if (tickets.scanTicketCount() != 0) {
+		if (tickets.scanTicketCount("gt-scan-budget") != 0) {
 			throw helper.assertionException("scan budget rejection acquired a partial ticket");
 		}
 
@@ -201,11 +204,13 @@ public final class ChunkTicketGameTests implements CustomTestMethodInvoker {
 			throw helper.assertionException("scan ticket was not acquired: " + applied);
 		}
 		ChunkTicketManager.ScanStats stats = tickets.scanStats();
-		if (stats.jobs() != 1 || stats.tickets() != 1 || stats.acquisitions() == 0) {
-			throw helper.assertionException("scan ticket stats are wrong: " + stats);
+		if (stats.jobs() != before.jobs() + 1 || stats.tickets() != before.tickets() + 1
+				|| stats.acquisitions() < before.acquisitions() + 1) {
+			throw helper.assertionException("scan ticket stats are wrong: " + stats
+					+ " (before " + before + ")");
 		}
 		tickets.releaseScan("gt-scan");
-		if (tickets.scanTicketCount() != 0 || tickets.scanStats().jobs() != 0) {
+		if (tickets.scanTicketCount("gt-scan") != 0 || tickets.scanStats().jobs() != before.jobs()) {
 			throw helper.assertionException("released scan ticket leaked");
 		}
 		tickets.releaseScan("gt-scan");

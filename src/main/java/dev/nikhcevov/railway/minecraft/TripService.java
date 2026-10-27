@@ -240,13 +240,17 @@ public final class TripService {
 		}
 
 		GraphLookup fromLookup = graphOrFailure(from);
-		GraphLookup toLookup = graphOrFailure(to);
 		RailGraph fromGraph = fromLookup instanceof GraphLookup.Found found ? found.graph() : null;
-		RailGraph toGraph = toLookup instanceof GraphLookup.Found found ? found.graph() : null;
+		GraphLookup toLookup = null;
+		RailGraph toGraph = railway.scans().graph(to.id());
 		// A scan covers the whole connected component from its station. One graph is
 		// therefore enough when it already contains the other endpoint's dock: after a
 		// restart only the origin may have been rescanned, while its graph still spans
-		// the destination. A separate destination scan is not required.
+		// the destination. Do not start a destination scan in that case.
+		if (toGraph == null && (fromGraph == null || fromGraph.rail(to.dock()) == null)) {
+			toLookup = graphOrFailure(to);
+			toGraph = toLookup instanceof GraphLookup.Found found ? found.graph() : null;
+		}
 		if (fromGraph == null && toGraph != null && toGraph.rail(departureDock) != null) {
 			fromGraph = toGraph;
 		}
@@ -385,14 +389,29 @@ public final class TripService {
 	}
 
 	private GraphLookup graphOrFailure(Station station) {
-		RailGraph graph = railway.scans().graph(station.id());
+		ScanService scans = railway.scans();
+		RailGraph graph = scans.graph(station.id());
 		if (graph != null) {
 			return new GraphLookup.Found(graph);
 		}
-		if (railway.scans().isRunning(station.id())) {
+		if (scans.isRunning(station.id())) {
 			return new GraphLookup.Failed(Failure.detail(FailureCode.SCAN_RUNNING, station.id().value()));
 		}
-		Failure scanFailure = railway.scans().failure(station.id());
+		// Graphs are derived and not persisted: after a restart, an invalidation
+		// or a previous failure the first launch must rebuild it in the
+		// background. The player only has to press the button again.
+		ServerLevel level = RailWorld.level(railway.server(), station.dimension());
+		if (level != null) {
+			ScanService.StartResult started = scans.autoStart(station, level, railway.config(),
+					railway.server().getTickCount(), railway.state().revision());
+			if (started instanceof ScanService.StartResult.Started) {
+				return new GraphLookup.Failed(ScanService.autoStartedFailure(station.id()));
+			}
+			if (started instanceof ScanService.StartResult.Rejected rejected) {
+				return new GraphLookup.Failed(rejected.failure());
+			}
+		}
+		Failure scanFailure = scans.failure(station.id());
 		return new GraphLookup.Failed(scanFailure != null ? scanFailure
 				: Failure.detail(FailureCode.SCAN_INCOMPLETE, station.id().value()));
 	}

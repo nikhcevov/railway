@@ -23,7 +23,7 @@
   "error.unsupported_geometry": "Unsupported rail geometry: only straight horizontal rails are handled in stage 1.",
   "error.unsupported_rail": "Unsupported rail type: %s.",
   "error.scan_incomplete": "The rail line is not scanned or not fully loaded.",
-  "error.scan_running": "Scan %s is still running.",
+  "error.scan_running": "Scan %s is running; wait for it to finish and try again.",
   "error.scan_failed": "Scan failed: %s",
   "error.limit_exceeded": "Limit exceeded: %s",
   "error.no_path": "No path between these stations on the current network.",

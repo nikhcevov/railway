@@ -2,6 +2,7 @@ package dev.nikhcevov.railway.minecraft;
 
 import dev.nikhcevov.railway.commands.Messages;
 import dev.nikhcevov.railway.diagnostics.DiagnosticsService;
+import dev.nikhcevov.railway.domain.Station;
 import dev.nikhcevov.railway.persistence.Config;
 import dev.nikhcevov.railway.persistence.JsonStateStore;
 import dev.nikhcevov.railway.persistence.StateStore;
@@ -9,6 +10,7 @@ import dev.nikhcevov.railway.persistence.WorldState;
 
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.permissions.Permissions;
 import net.minecraft.world.level.storage.LevelResource;
@@ -18,6 +20,7 @@ import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.nio.file.Path;
+import java.util.Collection;
 import java.util.List;
 
 /** Composition root. Holds the authoritative config/state and both runtime services. */
@@ -120,8 +123,51 @@ public final class Railway {
 			recovery.begin();
 		}
 		diagnostics = new DiagnosticsService(this);
+		// Graphs are derived caches and are never persisted, so the first tick
+		// after a restart must rebuild them without an admin command. Start the
+		// jobs after recovery.begin() so ticket accounting sees the checkpoints;
+		// duplicate starts are rejected by ScanService.
+		startStartupScans();
 		if (disabled) {
 			LOGGER.error("{}", Messages.format(Messages.Lang.EN, "system.disabled", disabledReason));
+		}
+	}
+
+	/** One background scan per anchored station, when the server becomes ready. */
+	private void startStartupScans() {
+		if (disabled || !stateLoaded) {
+			return;
+		}
+		startScansFor(state.stations());
+	}
+
+	/**
+	 * Starts one background scan per anchored station whose dimension is loaded.
+	 * Provisional stations and a disabled Railway are skipped, a missing level or
+	 * a rejected start is only logged, and an already running job is never
+	 * duplicated. Startup calls this once with every persisted station.
+	 */
+	public void startScansFor(Collection<Station> stations) {
+		if (disabled) {
+			return;
+		}
+		long tick = server.getTickCount();
+		long revision = state.revision();
+		for (Station station : stations) {
+			if (!station.isAnchored()) {
+				continue;
+			}
+			ServerLevel level = RailWorld.level(server, station.dimension());
+			if (level == null) {
+				LOGGER.warn("Cannot auto-scan station {}: dimension {} is not loaded",
+						station.id().value(), station.dimension());
+				continue;
+			}
+			ScanService.StartResult result = scans.autoStart(station, level, config, tick, revision);
+			if (result instanceof ScanService.StartResult.Rejected rejected) {
+				LOGGER.warn("Automatic scan for station {} did not start: {} {}", station.id().value(),
+						rejected.failure().code(), rejected.failure().detail());
+			}
 		}
 	}
 

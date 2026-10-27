@@ -56,9 +56,33 @@ the currently loaded area.
 
 A route is plannable as soon as one endpoint graph covers both docks. A separate
 scan of the destination station is not required: if the source graph contains the
-destination dock (the usual case after a restart, when only the origin was
-rescanned), it is used for the component/revision check and planning. The same
-fallback applies to `/rail route check`.
+destination dock (for example when the origin's scan finished before the
+destination's), it is used for the component/revision check and planning. The
+same fallback applies to `/rail route check`, which does not start a destination
+scan when the source graph already covers it.
+
+### Automatic scans
+
+Graphs are derived caches and are never persisted, so scanning needs no admin
+command:
+
+- on server start, after recovery has begun, one background scan starts for every
+  anchored station whose dimension is loaded. Provisional stations are skipped; a
+  missing level or a rejected start is only logged and never disables Railway;
+- a trip launch or `/rail route check` that finds neither a graph nor a running
+  job starts the scan automatically and rejects that attempt with `SCAN_RUNNING`
+  ("scan started automatically"); the next attempt succeeds once the scan
+  finishes. If the source graph already contains the destination dock, the
+  destination is not rescanned;
+- jobs are deduplicated per station and continue in the background after players
+  join; a restart simply starts fresh scans;
+- after a failed automatic scan, further automatic attempts for that station wait
+  200 ticks (10 seconds). A successful scan or an invalidation clears the delay,
+  and `/rail network scan <station>` bypasses it. The last failure remains
+  visible in `/rail network status` and `/rail diagnostics`;
+- if `maxManagedChunkTickets` is 0 or the shared budget cannot fit the frontier,
+  the job fails with `CHUNKS_NOT_READY`; startup, trips and other stations are
+  unaffected.
 
 ### Scan-time chunk loading
 
@@ -159,8 +183,8 @@ Recovery tickets and state are reported by `/rail diagnostics`.
 | `STATION_INCOMPLETE` | No exit, or provisional destination not anchored |
 | `STATION_DISABLED` | Enable the station |
 | `DESTINATION_NOT_ANCHORED` | Save the destination's return sign |
-| `SCAN_INCOMPLETE` / `SCAN_RUNNING` | `/rail network scan <station>` and wait |
-| `SCAN_FAILED` | Inspect scan status; fix rail load/geometry |
+| `SCAN_INCOMPLETE` / `SCAN_RUNNING` | Scans auto-start; wait and retry. Monitor with `/rail network status <station>`; `/rail network scan` forces a rescan |
+| `SCAN_FAILED` | Inspect scan status; fix rail load/geometry. Automatic retries pause for 10 seconds per station |
 | `NO_RAIL` / `UNSUPPORTED_RAIL` / `UNSUPPORTED_GEOMETRY` | Fix rail or dock; inspect `/rail diagnostics` |
 | `NO_PATH` | Graph disconnected or different revisions; rescan |
 | `BUTTON_REPLACED` | Re-register the sign/button |
@@ -193,7 +217,8 @@ reached `Done` successfully.
 - Config limits: `maxActiveTrips`, `maxManagedChunkTickets`, `maxRouteLength`,
   scan budgets, `maxTripTicks`.
 - Ticket window size is local; not a whole-route force-load.
-- Scans run in tick-batched jobs and are not persisted; rescan after restart if
+- Scans run in tick-batched jobs and are not persisted; they restart
+  automatically after a server restart and on demand, so no manual rescan is
   needed.
 - Diagnostics output is unpaginated chat.
 - Large networks can produce long `/rail diagnostics` output and many scan jobs.
@@ -202,7 +227,8 @@ reached `Done` successfully.
 
 Verified:
 
-- 217 unit tests and 49 GameTests;
+- 226 unit tests and 53 GameTests, including automatic startup/on-demand scans,
+  retry cooldown, and scan-ticket isolation from background jobs;
 - live diagnostics;
 - live startup recovery with a tagged cart + checkpoint;
 - vanilla world load without Railway;

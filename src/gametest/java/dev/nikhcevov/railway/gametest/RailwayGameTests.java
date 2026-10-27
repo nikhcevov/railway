@@ -30,6 +30,7 @@ import net.minecraft.world.level.block.state.properties.RailShape;
 import net.minecraft.world.level.entity.EntityTypeTest;
 
 import java.lang.reflect.Method;
+import java.util.List;
 import java.util.Set;
 
 /**
@@ -76,6 +77,98 @@ public final class RailwayGameTests implements CustomTestMethodInvoker {
 		TripId[] trip = {null};
 		startWhenFree(helper, fixture, player, fixture.homeToMine, trip);
 		assertArrival(helper, fixture, player, fixture.mineExit, trip);
+	}
+
+	/**
+	 * A missing graph is rebuilt without any manual command: the first launch
+	 * starts the scans and is rejected with {@code SCAN_RUNNING}, and the next
+	 * launch succeeds once the background scans finish.
+	 */
+	@GameTest(maxTicks = 600)
+	public void missingGraphAutoStartsScanAndRetrySucceeds(GameTestHelper helper) {
+		Fixture fixture = buildFixture(helper, "auto");
+		ScanService scans = fixture.railway().scans();
+		scans.invalidate(fixture.home().id());
+		scans.invalidate(fixture.mine().id());
+		ServerPlayer player = fixture.newPlayer(helper, fixture.homeExit);
+		TripId[] trip = {null};
+		int[] phase = {0};
+		helper.onEachTick(() -> {
+			if (trip[0] != null) {
+				return;
+			}
+			if (fixture.railway().trips().activeCount()
+					>= fixture.railway().config().maxActiveTrips() - 1) {
+				return;
+			}
+			if (phase[0] == 0) {
+				TripService.StartResult first = fixture.railway().trips().start(player, fixture.homeToMine);
+				if (!(first instanceof TripService.StartResult.Rejected rejected)) {
+					throw helper.assertionException("trip started without a scanned graph");
+				}
+				switch (rejected.failure().code()) {
+					case TRIP_LIMIT, RECOVERY_PENDING -> {
+						return;
+					}
+					case SCAN_RUNNING -> {
+						if (!scans.isRunning(fixture.home().id())) {
+							throw helper.assertionException("auto-start did not launch a source scan");
+						}
+						phase[0] = 1;
+						return;
+					}
+					default -> throw helper.assertionException(
+							"unexpected failure before auto-scan: " + rejected.failure().code());
+				}
+			}
+			if (scans.isRunning(fixture.home().id()) || scans.isRunning(fixture.mine().id())) {
+				return;
+			}
+			if (scans.graph(fixture.home().id()) == null || scans.graph(fixture.mine().id()) == null) {
+				throw helper.assertionException("auto-started scan did not complete: "
+						+ scans.failure(fixture.home().id()) + " / " + scans.failure(fixture.mine().id()));
+			}
+			TripService.StartResult second = fixture.railway().trips().start(player, fixture.homeToMine);
+			if (second instanceof TripService.StartResult.Rejected rejected) {
+				if (rejected.failure().code() == FailureCode.TRIP_LIMIT
+						|| rejected.failure().code() == FailureCode.RECOVERY_PENDING) {
+					return;
+				}
+				throw helper.assertionException("retry after auto-scan was rejected: "
+						+ rejected.failure().code());
+			}
+			trip[0] = ((TripService.StartResult.Started) second).id();
+		});
+		assertArrival(helper, fixture, player, fixture.mineExit, trip);
+	}
+
+	/**
+	 * The startup hook starts one scan per anchored, loadable station and skips
+	 * provisional stations. The real server-start invocation cannot be replayed
+	 * inside a shared GameTest server, so this exercises the same production
+	 * method with an explicit station list.
+	 */
+	@GameTest(maxTicks = 600)
+	public void startupScansAnchoredStationsOnly(GameTestHelper helper) {
+		Fixture fixture = buildFixture(helper, "boot");
+		ScanService scans = fixture.railway().scans();
+		scans.invalidate(fixture.home().id());
+		scans.invalidate(fixture.mine().id());
+		Station provisional = Station.provisional(new StationId("gtprov" + (System.nanoTime() & 0xFFFFFFL)),
+				"Game Test Provisional", fixture.home().dimension(),
+				fixture.railway().state().nextRevision());
+		fixture.railway().startScansFor(List.of(fixture.home(), fixture.mine(), provisional));
+		if (!scans.isRunning(fixture.home().id()) || !scans.isRunning(fixture.mine().id())) {
+			throw helper.assertionException("startup did not start scans for anchored stations");
+		}
+		if (scans.status(provisional.id()).isPresent()) {
+			throw helper.assertionException("startup scanned a provisional station");
+		}
+		helper.succeedWhen(() -> {
+			if (scans.graph(fixture.home().id()) == null || scans.graph(fixture.mine().id()) == null) {
+				throw helper.assertionException("startup scans did not complete");
+			}
+		});
 	}
 
 	@GameTest(maxTicks = 600)
