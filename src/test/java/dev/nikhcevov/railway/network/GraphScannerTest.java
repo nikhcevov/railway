@@ -94,14 +94,62 @@ class GraphScannerTest {
 	}
 
 	@Test
-	void reportsIncompleteScanAtUnloadedNeighbour() {
+	void waitsForUnloadedCandidateThenCompletes() {
+		FakeView view = new FakeView();
+		for (int x = 0; x <= 4; x++) {
+			view.rail(x, 64, 0, RailShapeType.EAST_WEST);
+		}
+		view.unloaded(2, 64, 0);
+		GraphScanner scanner = scanner(view, pos(0, 64, 0), 50);
+
+		assertFalse(scanner.advance(1000, Long.MAX_VALUE));
+		assertFalse(scanner.isFinished());
+		assertTrue(scanner.isWaiting());
+		assertTrue(scanner.pendingPositions().contains(pos(2, 64, 0)),
+				() -> "unexpected pending positions: " + scanner.pendingPositions());
+		assertEquals(2, scanner.railCount(), "loaded neighbours must still be discovered");
+
+		view.load(2, 64, 0);
+		assertTrue(scan(scanner));
+		assertFalse(scanner.isFailed());
+		assertFalse(scanner.isWaiting());
+		assertEquals(5, scanner.railCount());
+		assertEquals(4, planned(scanner.graph(), pos(0, 64, 0), pos(4, 64, 0)).length());
+	}
+
+	@Test
+	void waitsForUnloadedStartPositionThenCompletes() {
+		FakeView view = new FakeView();
+		view.rail(0, 64, 0, RailShapeType.EAST_WEST);
+		view.rail(1, 64, 0, RailShapeType.EAST_WEST);
+		view.unloaded(0, 64, 0);
+		GraphScanner scanner = scanner(view, pos(0, 64, 0), 50);
+
+		assertFalse(scanner.advance(1000, Long.MAX_VALUE));
+		assertTrue(scanner.isWaiting());
+		assertTrue(scanner.pendingPositions().contains(pos(0, 64, 0)));
+
+		view.load(0, 64, 0);
+		assertTrue(scan(scanner));
+		assertFalse(scanner.isFailed());
+		assertEquals(2, scanner.railCount());
+	}
+
+	@Test
+	void failsWithChunksNotReadyAfterBoundedWait() {
 		FakeView view = new FakeView();
 		view.rail(0, 64, 0, RailShapeType.EAST_WEST);
 		view.unloaded(1, 64, 0);
-		GraphScanner scanner = scanner(view, pos(0, 64, 0), 50);
-		assertTrue(scan(scanner));
+		GraphScanner scanner = new GraphScanner(DIMENSION, pos(0, 64, 0), view, 50, 1, 2);
+
+		assertFalse(scanner.advance(1000, Long.MAX_VALUE));
+		assertFalse(scanner.advance(1000, Long.MAX_VALUE));
+		assertTrue(scanner.advance(1000, Long.MAX_VALUE));
+		assertTrue(scanner.isFinished());
 		assertTrue(scanner.isFailed());
-		assertEquals(FailureCode.SCAN_INCOMPLETE, scanner.failure().code());
+		assertEquals(FailureCode.CHUNKS_NOT_READY, scanner.failure().code());
+		assertEquals(pos(1, 64, 0), scanner.failure().location());
+		assertTrue(scanner.failure().detail().contains("unloaded"));
 	}
 
 	@Test
@@ -191,6 +239,10 @@ class GraphScannerTest {
 
 		void unloaded(int x, int y, int z) {
 			unloaded.add(pos(x, y, z));
+		}
+
+		void load(int x, int y, int z) {
+			unloaded.remove(pos(x, y, z));
 		}
 
 		@Override

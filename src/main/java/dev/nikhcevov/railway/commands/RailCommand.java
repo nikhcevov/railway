@@ -337,10 +337,13 @@ public final class RailCommand {
 		if (status == null) {
 			scanText = Messages.format(lang, "scan.status.missing", station.id().value());
 		} else if (status.running()) {
-			scanText = Messages.format(lang, "scan.status.running", station.id().value(), status.rails());
+			scanText = status.waiting()
+					? Messages.format(lang, "scan.status.waiting", station.id().value(),
+							status.pendingChunks(), status.rails())
+					: Messages.format(lang, "scan.status.running", station.id().value(), status.rails());
 		} else if (status.failure() != null) {
 			scanText = Messages.format(lang, "scan.status.failed", station.id().value(),
-					Messages.failureText(lang, status.failure()));
+					scanFailureText(lang, status.failure()));
 		} else {
 			scanText = Messages.format(lang, "scan.status.complete", station.id().value(),
 					status.rails(), status.switches(), status.revision());
@@ -558,16 +561,28 @@ public final class RailCommand {
 		Messages.Lang lang = Messages.lang(source);
 		String text;
 		if (status.running()) {
-			text = Messages.format(lang, "scan.status.running", status.station().value(), status.rails());
+			text = status.waiting()
+					? Messages.format(lang, "scan.status.waiting", status.station().value(),
+							status.pendingChunks(), status.rails())
+					: Messages.format(lang, "scan.status.running", status.station().value(), status.rails());
 		} else if (status.failure() != null) {
 			text = Messages.format(lang, "scan.status.failed", status.station().value(),
-					Messages.failureText(lang, status.failure()));
+					scanFailureText(lang, status.failure()));
 		} else {
 			text = Messages.format(lang, "scan.status.complete", status.station().value(),
 					status.rails(), status.switches(), status.revision());
 		}
 		String finalText = text;
 		source.sendSuccess(() -> Component.literal(finalText), false);
+	}
+
+	/** A scan timeout is not a trip stop, so keep its wording scan-specific. */
+	private static String scanFailureText(Messages.Lang lang, Failure failure) {
+		if (failure.code() == FailureCode.CHUNKS_NOT_READY) {
+			return Messages.format(lang, "scan.status.chunks_not_ready",
+					failure.location() == null ? "-" : failure.location().shortString());
+		}
+		return Messages.failureText(lang, failure);
 	}
 
 	// ------------------------------------------------------------------ route
@@ -592,13 +607,28 @@ public final class RailCommand {
 		if (!to.hasExit()) {
 			return fail(source, Failure.detail(FailureCode.STATION_INCOMPLETE, to.displayName()));
 		}
-		RailGraph fromGraph = graphOrFail(source, railway, from);
-		if (fromGraph == null) {
-			return 0;
+		// One scan covers its whole connected component. Reuse it when it already
+		// contains the other endpoint, so a missing destination scan does not hide a
+		// route that the source graph proves.
+		RailGraph fromGraph = railway.scans().graph(from.id());
+		RailGraph toGraph = railway.scans().graph(to.id());
+		if (fromGraph != null && toGraph == null && fromGraph.rail(to.dock()) != null) {
+			toGraph = fromGraph;
 		}
-		RailGraph toGraph = graphOrFail(source, railway, to);
+		if (toGraph != null && fromGraph == null && toGraph.rail(from.dock()) != null) {
+			fromGraph = toGraph;
+		}
+		if (fromGraph == null) {
+			fromGraph = graphOrFail(source, railway, from);
+			if (fromGraph == null) {
+				return 0;
+			}
+		}
 		if (toGraph == null) {
-			return 0;
+			toGraph = graphOrFail(source, railway, to);
+			if (toGraph == null) {
+				return 0;
+			}
 		}
 		if (!fromGraph.componentKey().equals(toGraph.componentKey())) {
 			return fail(source, Failure.of(FailureCode.NO_PATH));

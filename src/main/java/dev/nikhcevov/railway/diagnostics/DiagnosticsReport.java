@@ -132,7 +132,11 @@ public record DiagnosticsReport(
 			int recoveryCheckpoints,
 			int recoveryTickets,
 			long recoveryAcquisitions,
-			long recoveryReleases
+			long recoveryReleases,
+			int scanJobs,
+			int scanTickets,
+			long scanAcquisitions,
+			long scanReleases
 	) {
 	}
 
@@ -251,7 +255,9 @@ public record DiagnosticsReport(
 	private void renderTickets(List<String> lines, Messages.Lang lang) {
 		add(lines, lang, "diagnostics.tickets", tickets.held(), tickets.budget(), tickets.pending(),
 				tickets.recoveryCheckpoints(), tickets.recoveryTickets(),
-				tickets.recoveryAcquisitions(), tickets.recoveryReleases());
+				tickets.recoveryAcquisitions(), tickets.recoveryReleases(),
+				tickets.scanJobs(), tickets.scanTickets(),
+				tickets.scanAcquisitions(), tickets.scanReleases());
 	}
 
 	private void renderStations(List<String> lines, Messages.Lang lang) {

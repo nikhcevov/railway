@@ -82,8 +82,9 @@ no version bump was required.
 
 - `maxActiveTrips` protects the server from too many carts. Route reservations
   still prevent conflicting trips.
-- `maxManagedChunkTickets` is a global ticket-refcount budget, not a route-length
-  limit. Larger values allow more local windows for parallel trips.
+- `maxManagedChunkTickets` is a global ticket budget shared by trip windows,
+  recovery checkpoints and scan frontiers, not a route-length limit. Scan tickets
+  are additionally capped at 32. Larger values allow more parallel windows.
 - `maxTripTicks` is a safety net. A cart that fails to finish within this many
   ticks aborts.
 - `scanRailsPerTick` / `scanTimeBudgetMs` control scan latency versus tick load.

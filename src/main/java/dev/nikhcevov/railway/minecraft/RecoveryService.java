@@ -463,7 +463,6 @@ public final class RecoveryService {
 	 * means the chunk was never saved, so a saved cart cannot be hidden there.
 	 */
 	private static void probeStorage(ServerLevel level, ChunkPos pos, Consumer<Boolean> callback) {
-		level.getChunkSource().chunkMap.read(pos).whenComplete((data, error) ->
-				callback.accept(error == null && data != null && data.isPresent()));
+		LevelStorageProbe.exists(level, pos, callback);
 	}
 }

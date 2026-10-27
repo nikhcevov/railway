@@ -4,6 +4,7 @@ import dev.nikhcevov.railway.commands.Messages;
 import dev.nikhcevov.railway.domain.Binding;
 import dev.nikhcevov.railway.domain.Station;
 import dev.nikhcevov.railway.domain.StationId;
+import dev.nikhcevov.railway.minecraft.ChunkTicketManager;
 import dev.nikhcevov.railway.minecraft.Railway;
 import dev.nikhcevov.railway.minecraft.RecoveryService;
 import dev.nikhcevov.railway.minecraft.ScanService;
@@ -80,6 +81,7 @@ public final class DiagnosticsService {
 					entry.quarantine().reason()));
 		}
 
+		ChunkTicketManager.ScanStats ticketScans = railway.tickets().scanStats();
 		DiagnosticsReport.TicketSummary ticketSummary = new DiagnosticsReport.TicketSummary(
 				railway.tickets().ticketCount(),
 				railway.config().maxManagedChunkTickets(),
@@ -87,7 +89,11 @@ public final class DiagnosticsService {
 				ticketRecovery.checkpoints(),
 				ticketRecovery.tickets(),
 				ticketRecovery.acquisitions(),
-				ticketRecovery.releases());
+				ticketRecovery.releases(),
+				ticketScans.jobs(),
+				ticketScans.tickets(),
+				ticketScans.acquisitions(),
+				ticketScans.releases());
 
 		return new DiagnosticsReport(global, trips,
 				railway.trips().ownedReservationCount(), quarantine, scans, ticketSummary,

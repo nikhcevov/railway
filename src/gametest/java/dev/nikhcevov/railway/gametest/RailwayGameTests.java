@@ -59,6 +59,25 @@ public final class RailwayGameTests implements CustomTestMethodInvoker {
 		assertArrival(helper, fixture, player, fixture.homeExit, trip);
 	}
 
+	/**
+	 * A destination does not need its own scan job when the source station's graph
+	 * already covers the destination dock, as happens after a restart.
+	 */
+	@GameTest(maxTicks = 600)
+	public void sourceGraphAlonePlansWhenDestinationHasNoScan(GameTestHelper helper) {
+		Fixture fixture = buildFixture(helper, "g");
+		ScanService scans = fixture.railway().scans();
+		scans.invalidate(fixture.mine().id());
+		if (scans.graph(fixture.home().id()) == null
+				|| scans.graph(fixture.home().id()).rail(fixture.mine().dock()) == null) {
+			throw helper.assertionException("source graph does not contain the destination dock");
+		}
+		ServerPlayer player = fixture.newPlayer(helper, fixture.homeExit);
+		TripId[] trip = {null};
+		startWhenFree(helper, fixture, player, fixture.homeToMine, trip);
+		assertArrival(helper, fixture, player, fixture.mineExit, trip);
+	}
+
 	@GameTest(maxTicks = 600)
 	public void dismountDuringTripCleansUp(GameTestHelper helper) {
 		Fixture fixture = buildFixture(helper, "s");

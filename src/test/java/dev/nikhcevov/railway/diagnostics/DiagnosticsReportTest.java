@@ -50,7 +50,7 @@ class DiagnosticsReportTest {
 		assertContains(lines, "Scan jobs (1):");
 		assertContains(lines, "Scan scan-1 @ alpha: complete, rails 10, switches 2, revision 9");
 		assertContains(lines, "Chunk tickets: held 2/128, pending 1; recovery checkpoints 1, "
-				+ "tickets 1, acq 2, rel 1");
+				+ "tickets 1, acq 2, rel 1; scans 3, tickets 2, acq 4, rel 3");
 		assertContains(lines, "Stations (2):");
 		assertContains(lines, "alpha (Alpha) | minecraft:overworld | enabled | rev 3 | "
 				+ "dock 1 64 2 | exit 1 64 4 | units 2");
@@ -79,7 +79,8 @@ class DiagnosticsReportTest {
 		assertContains(lines, "Резервирования: занято 4, карантин 1");
 		assertContains(lines, "Задания сканирования (1):");
 		assertContains(lines, "Чанк-tickets: занято 2/128, ожидает 1; восстановление: "
-				+ "чекпоинтов 1, tickets 1, получено 2, освобождено 1");
+				+ "чекпоинтов 1, tickets 1, получено 2, освобождено 1; сканы 3, tickets 2, "
+				+ "получено 4, освобождено 3");
 		assertContains(lines, "Станции (2):");
 		assertContains(lines, "beta (Beta) | выключена | provisional (не закреплена) | единиц 1");
 		assertContains(lines, "Детали станции alpha (Alpha) | minecraft:overworld | 1 64 2");
@@ -96,7 +97,7 @@ class DiagnosticsReportTest {
 						new DiagnosticsReport.Limits(1, 0, 1, 1, 1, 1),
 						new DiagnosticsReport.RecoverySummary(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)),
 				List.of(), 0, List.of(), List.of(),
-				new DiagnosticsReport.TicketSummary(0, 0, 0, 0, 0, 0, 0),
+				new DiagnosticsReport.TicketSummary(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
 				List.of(), Optional.empty());
 
 		List<String> lines = report.render(Messages.Lang.EN);
@@ -106,7 +107,7 @@ class DiagnosticsReportTest {
 		assertContains(lines, "Active trips: none");
 		assertContains(lines, "Scan jobs: none");
 		assertContains(lines, "Chunk tickets: held 0/0, pending 0; recovery checkpoints 0, "
-				+ "tickets 0, acq 0, rel 0");
+				+ "tickets 0, acq 0, rel 0; scans 0, tickets 0, acq 0, rel 0");
 		assertContains(lines, "Stations: none");
 		assertFalse(lines.stream().anyMatch(line -> line.startsWith("Station detail")));
 	}
@@ -147,7 +148,7 @@ class DiagnosticsReportTest {
 						new DiagnosticsReport.Limits(8, 128, 10_000, 250, 2, 50_000),
 						new DiagnosticsReport.RecoverySummary(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)),
 				List.of(), 0, List.of(), scans,
-				new DiagnosticsReport.TicketSummary(0, 128, 0, 0, 0, 0, 0),
+				new DiagnosticsReport.TicketSummary(0, 128, 0, 0, 0, 0, 0, 0, 0, 0, 0),
 				stations, focused);
 	}
 
@@ -176,7 +177,7 @@ class DiagnosticsReportTest {
 				List.of(new DiagnosticsReport.QuarantineSummary("rail:alpha:1,64,2", TRIP.value(), CART,
 						"cart removed")),
 				List.of(scan),
-				new DiagnosticsReport.TicketSummary(2, 128, 1, 1, 1, 2, 1),
+				new DiagnosticsReport.TicketSummary(2, 128, 1, 1, 1, 2, 1, 3, 2, 4, 3),
 				List.of(alpha, beta), Optional.of(alpha));
 	}
 

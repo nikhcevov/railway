@@ -240,15 +240,25 @@ public final class TripService {
 		}
 
 		GraphLookup fromLookup = graphOrFailure(from);
-		if (fromLookup instanceof GraphLookup.Failed failed) {
-			return reject(failed.failure());
-		}
 		GraphLookup toLookup = graphOrFailure(to);
-		if (toLookup instanceof GraphLookup.Failed failed) {
-			return reject(failed.failure());
+		RailGraph fromGraph = fromLookup instanceof GraphLookup.Found found ? found.graph() : null;
+		RailGraph toGraph = toLookup instanceof GraphLookup.Found found ? found.graph() : null;
+		// A scan covers the whole connected component from its station. One graph is
+		// therefore enough when it already contains the other endpoint's dock: after a
+		// restart only the origin may have been rescanned, while its graph still spans
+		// the destination. A separate destination scan is not required.
+		if (fromGraph == null && toGraph != null && toGraph.rail(departureDock) != null) {
+			fromGraph = toGraph;
 		}
-		RailGraph fromGraph = ((GraphLookup.Found) fromLookup).graph();
-		RailGraph toGraph = ((GraphLookup.Found) toLookup).graph();
+		if (toGraph == null && fromGraph != null && fromGraph.rail(to.dock()) != null) {
+			toGraph = fromGraph;
+		}
+		if (fromGraph == null) {
+			return reject(((GraphLookup.Failed) fromLookup).failure());
+		}
+		if (toGraph == null) {
+			return reject(((GraphLookup.Failed) toLookup).failure());
+		}
 		if (!fromGraph.componentKey().equals(toGraph.componentKey())
 				|| fromGraph.revision() != toGraph.revision()) {
 			return reject(Failure.of(FailureCode.NO_PATH));

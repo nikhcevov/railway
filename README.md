@@ -169,6 +169,8 @@ is fixed and `/rail reload` or a restart succeeds. See
   quarantines, chunk tickets, and station units/main.
 - Chunk tickets keep only the current local window and braking window ready; the
   whole route is not force-loaded.
+- A scan pauses at unloaded rail chunks and loads only existing saved frontier
+  chunks (bounded, shared ticket budget); it never plans from unloaded data.
 - On restart, persisted checkpoint carts are reconciled by UUID and safely
   removed/stopped; trips never resume automatically.
 - State is stored in `<world>/railway/state.json` (schema 4). Migrations create a
@@ -179,8 +181,9 @@ See [`docs/operations.md`](docs/operations.md).
 ## Important limitations
 
 - A chunk ticket uses vanilla loading/simulation propagation. Railway does not
-  request new chunks or scan unproven chunks, but vanilla may load an adjacent
-  missing chunk at the propagation boundary.
+  request new chunks: trip tickets cover only scanned route chunks and scan
+  tickets only chunks that already exist in level storage. Vanilla may still load
+  or generate an adjacent missing chunk at the propagation boundary.
 - No true long-route-beyond-simulation-distance or mid-trip `kill -9` acceptance
   run has been completed with a real client. The code paths and local tests exist;
   see the Stage 5 report.

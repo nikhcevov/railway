@@ -47,7 +47,9 @@ Commits: `ef39704` (Stage 4 closeout), `626c7f1` (chunk tickets), `6b6f6ad`
   writes and schema round-trips are covered by tests.
 - No true long route beyond simulation distance. GameTest plots are force-loaded;
   local window/budget/readiness and launch-tail deferral are tested, but a real
-  scan-then-unload long run remains manual.
+  scan-then-unload long run remains manual. Scan-time frontier loading (below) is
+  covered by unit and ticket-lifecycle tests, not by an automated multi-chunk
+  unload/load cycle.
 - Vanilla ticket propagation can load a missing adjacent chunk; Railway never
   requests new chunks or scans unproven chunks, but it cannot prevent vanilla
   radius propagation at the ticket boundary. A true no-generation guarantee would
@@ -57,3 +59,39 @@ Commits: `ef39704` (Stage 4 closeout), `626c7f1` (chunk tickets), `6b6f6ad`
 - Diagnostics output is unpaginated chat; very large networks produce long output.
 - The production removal test used a vanilla server and a copied world, not a
   separate Fabric modpack install.
+
+## Follow-up: scan-time frontier loading (2026-10-28)
+
+The original scan failed with `SCAN_INCOMPLETE` at the first unloaded candidate,
+so a route whose far end was outside simulation distance could never be planned.
+
+Implemented:
+
+- `GraphScanner` pauses at an unloaded candidate, exposes
+  `pendingPositions()`/`isWaiting()`, keeps discovering loaded neighbours, and
+  retries the blocked frontier. After 200 consecutive no-progress advances it
+  fails with `CHUNKS_NOT_READY` at the first pending block.
+- `ScanService` requests loading tickets only for the current unloaded frontier,
+  only after a read-only level-storage probe confirms the chunk was saved. Ticket
+  budget is `min(maxManagedChunkTickets, 32)`, shared with trip and recovery
+  tickets. Tickets are released on completion, failure, invalidation/clear and
+  shutdown. Missing chunks are treated as empty, not ticketed.
+- `TripService` (and `/rail route check`) no longer requires a destination scan
+  when the source graph already contains the destination dock, so a restarted
+  server with only the origin rescanned can still start the route.
+- Diagnostics report scan-ticket counts; `/rail network status` reports a waiting
+  scan and its pending chunk count.
+
+Automated verification for this follow-up:
+
+- Unit: **219 passed, 0 failed** (`cleanTest test`, repeated twice).
+- GameTests: **51 passed, 0 failed** (`runGameTest`, repeated twice).
+- New coverage: scanner wait/retry/timeout; scan ticket budget/release; route
+  launch with the destination scan absent (GameTest).
+
+Limitation: GameTest plots are force-loaded and their chunks cannot be truly
+unloaded, so the full multi-chunk wait/load cycle is not exercised inside the
+GameTest server. The scanner state machine (retry and timeout) and the ticket
+manager are tested directly; the end-to-end long route still needs the dev
+server/manual run. Vanilla ticket propagation may still generate a missing
+neighbour required by a loaded chunk's status (documented in `operations.md`).

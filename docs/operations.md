@@ -54,13 +54,54 @@ portions are validated at launch; unloaded portions, target exit, and turnouts a
 validated when the ticket window reaches them. This allows a route to start outside
 the currently loaded area.
 
+A route is plannable as soon as one endpoint graph covers both docks. A separate
+scan of the destination station is not required: if the source graph contains the
+destination dock (the usual case after a restart, when only the origin was
+rescanned), it is used for the component/revision check and planning. The same
+fallback applies to `/rail route check`.
+
+### Scan-time chunk loading
+
+A scan that reaches a rail component outside the loaded area pauses instead of
+failing with `SCAN_INCOMPLETE`:
+
+- only the chunks of the current unloaded frontier are requested, never the whole
+  route;
+- a chunk is requested only after a read-only level-storage probe proves it was
+  saved; a chunk that was never saved cannot contain player-built rail and is
+  treated as empty, not ticketed;
+- the ticket is server-only, non-persistent and loading-only (no simulation),
+  with radius 0;
+- scan tickets share `maxManagedChunkTickets` with trip and recovery tickets and
+  are additionally capped at 32; a frontier that cannot fit the budget fails with
+  `CHUNKS_NOT_READY` instead of planning a partial graph;
+- the scan retries the blocked frontier every tick and keeps discovering loaded
+  neighbours meanwhile;
+- after 200 consecutive ticks on the same unresolved chunk set the scan fails with
+  `CHUNKS_NOT_READY` at the first pending block and releases its tickets;
+- tickets are also released on completion, failure, scan invalidation/clear and
+  shutdown; ticket timeouts (200 ticks) are a final safety net for crashes.
+
+Resource bounds: a scan holds at most the frontier chunks around its blocked
+positions (in practice one or two), not a route-length window. Long routes are
+thus scanned incrementally; the number of loaded chunks does not grow with route
+length. With `maxManagedChunkTickets: 0` a scan cannot leave the naturally loaded
+area and fails with `CHUNKS_NOT_READY`.
+
+Limitation: strict storage probing controls which chunks Railway tickets. Vanilla
+chunk loading still computes the neighbors a chunk's status requires, so loading
+an existing saved chunk can cause the generator to produce a missing neighbor. A
+strict no-generation guarantee would require replacing vanilla ticket propagation;
+see the generation caveat below.
+
 ### Generation caveat
 
-Railway requests tickets only for route chunks proven by the scanned graph and
-does not call force-load or generation APIs. Vanilla ticket propagation can still
-load an adjacent missing chunk at the radius boundary. A strict no-generation
-guarantee would require replacing vanilla ticket propagation. This is a known
-limitation of the current build.
+Railway requests tickets only for route chunks proven by the scanned graph and for
+scan-frontier chunks proven to exist in level storage. It does not call force-load
+or generation APIs. Vanilla ticket propagation can still load an adjacent missing
+chunk at the radius boundary. A strict no-generation guarantee would require
+replacing vanilla ticket propagation. This is a known limitation of the current
+build.
 
 ## Restart and recovery
 

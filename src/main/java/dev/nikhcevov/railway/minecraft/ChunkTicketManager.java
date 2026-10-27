@@ -15,6 +15,7 @@ import org.slf4j.Logger;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -23,10 +24,12 @@ import java.util.Optional;
 import java.util.Set;
 
 /**
- * Owns every chunk ticket Railway creates for trips. Tickets are server-only,
- * non-persistent, entity-ticking simulation tickets for the local route window
- * only. A caller may only ticket chunks that the scanned route already proved to
- * exist; the manager itself never forces chunks and never requests generation.
+ * Owns every chunk ticket Railway creates for trips, recovery and scans. Tickets
+ * are server-only and non-persistent. Trip tickets are entity-ticking simulation
+ * tickets for the local route window only; scan tickets are loading tickets for
+ * the immediate unloaded frontier of a scan. A caller may only ticket chunks that
+ * already exist in level storage; the manager itself never probes, forces chunks
+ * or requests generation.
  *
  * <p>All access is on the server thread. A ticket expiration doubles as a
  * safety valve: if an owner stops refreshing (for example because of a crash),
@@ -61,6 +64,17 @@ public final class ChunkTicketManager {
 			TICKET_TIMEOUT_TICKS,
 			TicketType.FLAG_LOADING
 					| TicketType.FLAG_SIMULATION
+					| TicketType.FLAG_CAN_EXPIRE_IF_UNLOADED
+	);
+
+	/**
+	 * Loading-only ticket for the unloaded frontier of a scan. No simulation flag:
+	 * a scan reads block states and never needs chunk ticking. Radius {@code 0}
+	 * loads exactly the requested chunk to full status.
+	 */
+	private static final TicketType SCAN_TICKET = new TicketType(
+			TICKET_TIMEOUT_TICKS,
+			TicketType.FLAG_LOADING
 					| TicketType.FLAG_CAN_EXPIRE_IF_UNLOADED
 	);
 
@@ -121,11 +135,34 @@ public final class ChunkTicketManager {
 	) {
 	}
 
+	/** Tickets one scan job holds for its current unloaded frontier. */
+	private static final class ScanState {
+		final ServerLevel level;
+		final Set<ChunkWindow.Key> held = new LinkedHashSet<>();
+		long acquisitions;
+		long releases;
+		long lastRefreshTick = Long.MIN_VALUE;
+
+		ScanState(ServerLevel level) {
+			this.level = level;
+		}
+	}
+
+	public record ScanStats(
+			int jobs,
+			int tickets,
+			long acquisitions,
+			long releases
+	) {
+	}
+
 	private final Logger logger;
 	private final Map<TripId, TripState> trips = new LinkedHashMap<>();
 	private final Map<ChunkWindow.Key, Integer> references = new HashMap<>();
 	private final Map<TripId, RecoveryState> recovery = new LinkedHashMap<>();
 	private final Map<ChunkWindow.Key, Integer> recoveryReferences = new HashMap<>();
+	private final Map<String, ScanState> scans = new LinkedHashMap<>();
+	private final Map<ChunkWindow.Key, Integer> scanReferences = new HashMap<>();
 
 	public ChunkTicketManager(Logger logger) {
 		this.logger = logger;
@@ -161,19 +198,13 @@ public final class ChunkTicketManager {
 			return new Update.Applied(true, 0, 0);
 		}
 
-		// Distinct chunks after reconciliation: current references minus this trip's
-		// holdings, plus any desired chunk this trip would newly hold (including the
-		// chunks that stay in the window and are refcounted only by this trip).
-		int projected = references.size() - state.held.size();
-		for (ChunkWindow.Key key : desired) {
-			Integer count = references.get(key);
-			if (count == null || (count == 1 && state.held.contains(key))) {
-				projected++;
-			}
-		}
+		// Distinct chunks after reconciliation across trips, recovery and scans:
+		// current references minus this trip's holdings, plus every desired chunk
+		// this trip would newly hold.
+		int projected = projectedTripTicketCount(state.held, desiredSet);
 		if (desired.size() > budget || projected > budget) {
 			logger.warn("Trip {} needs {} chunk ticket(s), shared budget is {} ({} in use)",
-					tripId, desired.size(), budget, references.size());
+					tripId, desired.size(), budget, managedChunkCount());
 			return new Update.BudgetExceeded(Math.max(desired.size(), projected), budget);
 		}
 
@@ -231,6 +262,184 @@ public final class ChunkTicketManager {
 		}
 		references.clear();
 		releaseAllRecovery();
+		releaseAllScans();
+	}
+
+	// ------------------------------------------------------------------ scans
+
+	/**
+	 * Reconciles a scan job's tickets with the chunks of its current unloaded
+	 * frontier. The caller must pass only chunks confirmed present in level
+	 * storage and not loaded yet; this method only makes existing chunks readable.
+	 *
+	 * @param budget shared managed-ticket limit, {@code <= 0} disables tickets
+	 * @return how many frontier chunks the job currently holds
+	 */
+	public Update updateScan(ServerLevel level, String owner, Set<ChunkWindow.Key> desired, int budget) {
+		if (budget <= 0) {
+			releaseScan(owner);
+			return new Update.Applied(false, 0, 0);
+		}
+		Set<ChunkWindow.Key> desiredSet = new LinkedHashSet<>(desired);
+		if (desiredSet.isEmpty()) {
+			releaseScan(owner);
+			return new Update.Applied(true, 0, 0);
+		}
+		// Budget rejection must not create an empty scan state that later shows up
+		// in diagnostics as an owner.
+		ScanState existing = scans.get(owner);
+		Set<ChunkWindow.Key> held = existing == null || existing.level != level ? Set.of() : existing.held;
+		int projected = projectedScanTicketCount(held, desiredSet);
+		if (desiredSet.size() > budget || projected > budget) {
+			logger.warn("Scan {} needs {} chunk ticket(s), shared budget is {} ({} in use)",
+					owner, desiredSet.size(), budget, managedChunkCount());
+			return new Update.BudgetExceeded(Math.max(desiredSet.size(), projected), budget);
+		}
+		ScanState state = scanStateFor(level, owner);
+
+		for (ChunkWindow.Key key : List.copyOf(state.held)) {
+			if (!desiredSet.contains(key)) {
+				releaseScanReference(level, key);
+				state.held.remove(key);
+				state.releases++;
+			}
+		}
+
+		long now = level.getServer().getTickCount();
+		boolean refresh = now - state.lastRefreshTick >= REFRESH_INTERVAL_TICKS
+				|| state.lastRefreshTick == Long.MIN_VALUE;
+		for (ChunkWindow.Key key : desiredSet) {
+			if (state.held.contains(key)) {
+				if (refresh) {
+					refreshScan(level, key);
+				}
+			} else {
+				acquireScan(level, key);
+				state.held.add(key);
+				state.acquisitions++;
+			}
+		}
+		if (refresh) {
+			state.lastRefreshTick = now;
+		}
+		return new Update.Applied(true, state.held.size(), 0);
+	}
+
+	/** Releases every ticket owned by a scan job. Safe when it holds none. */
+	public void releaseScan(String owner) {
+		ScanState state = scans.remove(owner);
+		if (state == null) {
+			return;
+		}
+		for (ChunkWindow.Key key : state.held) {
+			releaseScanReference(state.level, key);
+		}
+		state.held.clear();
+	}
+
+	public void releaseAllScans() {
+		for (String owner : List.copyOf(scans.keySet())) {
+			releaseScan(owner);
+		}
+		scanReferences.clear();
+	}
+
+	/** Number of distinct chunks currently held for scan frontiers. */
+	public int scanTicketCount() {
+		return scanReferences.size();
+	}
+
+	public ScanStats scanStats() {
+		int tickets = 0;
+		long acquisitions = 0;
+		long releases = 0;
+		for (ScanState state : scans.values()) {
+			tickets += state.held.size();
+			acquisitions += state.acquisitions;
+			releases += state.releases;
+		}
+		return new ScanStats(scans.size(), tickets, acquisitions, releases);
+	}
+
+	/** Distinct chunks held across trips, recovery and scans. */
+	public int managedChunkCount() {
+		return unionKeys().size();
+	}
+
+	/**
+	 * Distinct chunks that would be held after a trip release/reacquire step.
+	 * A chunk stays counted while another owner still references it, so the
+	 * shared budget counts each chunk once.
+	 */
+	private int projectedTripTicketCount(Set<ChunkWindow.Key> held, Set<ChunkWindow.Key> desired) {
+		Set<ChunkWindow.Key> union = unionKeys();
+		for (ChunkWindow.Key key : held) {
+			if (references.getOrDefault(key, 0) == 1
+					&& !recoveryReferences.containsKey(key)
+					&& !scanReferences.containsKey(key)) {
+				union.remove(key);
+			}
+		}
+		union.addAll(desired);
+		return union.size();
+	}
+
+	/** Same projection for a scan job releasing/reacquiring its own frontier. */
+	private int projectedScanTicketCount(Set<ChunkWindow.Key> held, Set<ChunkWindow.Key> desired) {
+		Set<ChunkWindow.Key> union = unionKeys();
+		for (ChunkWindow.Key key : held) {
+			if (scanReferences.getOrDefault(key, 0) == 1
+					&& !references.containsKey(key)
+					&& !recoveryReferences.containsKey(key)) {
+				union.remove(key);
+			}
+		}
+		union.addAll(desired);
+		return union.size();
+	}
+
+	private Set<ChunkWindow.Key> unionKeys() {
+		Set<ChunkWindow.Key> union = new HashSet<>();
+		union.addAll(references.keySet());
+		union.addAll(recoveryReferences.keySet());
+		union.addAll(scanReferences.keySet());
+		return union;
+	}
+
+	private ScanState scanStateFor(ServerLevel level, String owner) {
+		ScanState state = scans.get(owner);
+		if (state != null && state.level != level) {
+			logger.warn("Scan {} changed level; dropping its old chunk tickets", owner);
+			releaseScan(owner);
+			state = null;
+		}
+		if (state == null) {
+			state = new ScanState(level);
+			scans.put(owner, state);
+		}
+		return state;
+	}
+
+	private void acquireScan(ServerLevel level, ChunkWindow.Key key) {
+		level.getChunkSource().addTicketWithRadius(SCAN_TICKET, new ChunkPos(key.x(), key.z()), 0);
+		scanReferences.merge(key, 1, Integer::sum);
+	}
+
+	private void refreshScan(ServerLevel level, ChunkWindow.Key key) {
+		level.getChunkSource().addTicketWithRadius(SCAN_TICKET, new ChunkPos(key.x(), key.z()), 0);
+	}
+
+	private void releaseScanReference(ServerLevel level, ChunkWindow.Key key) {
+		Integer count = scanReferences.get(key);
+		if (count == null) {
+			return;
+		}
+		if (count <= 1) {
+			scanReferences.remove(key);
+			level.getChunkSource().removeTicketWithRadius(SCAN_TICKET, new ChunkPos(key.x(), key.z()), 0);
+		} else {
+			scanReferences.put(key, count - 1);
+		}
 	}
 
 	// --------------------------------------------------------------- recovery

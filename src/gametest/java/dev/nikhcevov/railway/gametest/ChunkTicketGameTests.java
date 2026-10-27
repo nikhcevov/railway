@@ -175,6 +175,43 @@ public final class ChunkTicketGameTests implements CustomTestMethodInvoker {
 		helper.succeed();
 	}
 
+	@GameTest(maxTicks = 40)
+	public void scanTicketsAreBoundedAndReleased(GameTestHelper helper) {
+		ChunkTicketManager tickets = Railway.get().tickets();
+		ServerLevel level = helper.getLevel();
+		ChunkWindow.Key origin = ChunkWindow.Key.of(
+				RailWorld.loc(helper.absolutePos(new BlockPos(0, 1, 0))));
+		ChunkWindow.Key neighbour = new ChunkWindow.Key(origin.x() + 1, origin.z());
+
+		// Two frontier chunks cannot fit into a one-ticket scan budget: the update
+		// is atomic, so no partial ticket is taken.
+		ChunkTicketManager.Update exceeded = tickets.updateScan(level, "gt-scan-budget",
+				Set.of(origin, neighbour), 1);
+		if (!(exceeded instanceof ChunkTicketManager.Update.BudgetExceeded)) {
+			throw helper.assertionException("expected a bounded scan update, got " + exceeded);
+		}
+		if (tickets.scanTicketCount() != 0) {
+			throw helper.assertionException("scan budget rejection acquired a partial ticket");
+		}
+
+		// The loaded plot chunk can be held and released without generating terrain.
+		ChunkTicketManager.Update applied = tickets.updateScan(level, "gt-scan", Set.of(origin), 128);
+		if (!(applied instanceof ChunkTicketManager.Update.Applied ok) || !ok.enabled()
+				|| ok.tickets() != 1) {
+			throw helper.assertionException("scan ticket was not acquired: " + applied);
+		}
+		ChunkTicketManager.ScanStats stats = tickets.scanStats();
+		if (stats.jobs() != 1 || stats.tickets() != 1 || stats.acquisitions() == 0) {
+			throw helper.assertionException("scan ticket stats are wrong: " + stats);
+		}
+		tickets.releaseScan("gt-scan");
+		if (tickets.scanTicketCount() != 0 || tickets.scanStats().jobs() != 0) {
+			throw helper.assertionException("released scan ticket leaked");
+		}
+		tickets.releaseScan("gt-scan");
+		helper.succeed();
+	}
+
 	@Override
 	public void invokeTestMethod(GameTestHelper context, Method method) throws ReflectiveOperationException {
 		method.invoke(this, context);

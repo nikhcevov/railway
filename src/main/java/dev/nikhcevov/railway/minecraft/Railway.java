@@ -96,8 +96,8 @@ public final class Railway {
 			config = Config.defaults();
 		}
 
-		scans = new ScanService(LOGGER);
 		tickets = new ChunkTicketManager(LOGGER);
+		scans = new ScanService(LOGGER, tickets);
 		trips = new TripService(this, LOGGER, tickets);
 		signs = new SignRegistrationService(this, LOGGER);
 		store = new JsonStateStore(server.getWorldPath(LevelResource.ROOT));
