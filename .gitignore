@@ -22,6 +22,7 @@ classes/
 # dev server + client run dirs
 run/
 server-modrinth/
+prod-test-server/
 
 # macos
 *.DS_Store
