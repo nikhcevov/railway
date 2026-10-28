@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.0-alpha.3 — 2026-10-28
+
+- Player-facing failures now show station display names instead of internal IDs.
+- Disabled, incomplete, and active-trip notifications use readable names.
+- Dimension mismatches report the dimension problem instead of a station UUID.
+- Sign validation details are localized (EN/RU) instead of exposing enum names.
+- Internal failure codes are hidden from player chat; `/rail diagnostics` retains
+  them for support reports.
+- Missing station references now say the station for the button no longer exists.
+
 ## 0.1.0-alpha.2 — 2026-10-28
 
 - Invalidate the scanned component graph when a rail is placed, removed, or

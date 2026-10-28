@@ -15,6 +15,7 @@ import java.io.Reader;
 import java.nio.charset.StandardCharsets;
 import java.util.Locale;
 import java.util.Map;
+import java.util.regex.Pattern;
 
 /**
  * Bilingual server-side message catalog. The client only receives literal text,
@@ -29,6 +30,38 @@ public final class Messages {
 	private static final Gson GSON = new Gson();
 	private static final Map<String, String> EN = load("en_us");
 	private static final Map<String, String> RU = load("ru_ru");
+	private static final Pattern ENUM_DETAIL = Pattern.compile("[A-Z][A-Z0-9_]+");
+	private static final Map<String, String> DETAIL_KEYS = Map.ofEntries(
+			Map.entry("SIGN_SUPPORT_NOT_SOLID", "error.detail.sign_support_not_solid"),
+			Map.entry("SIGN_NOT_ATTACHED", "error.detail.sign_not_attached"),
+			Map.entry("SIGN_HEIGHT_OUT_OF_RANGE", "error.detail.sign_height_out_of_range"),
+			Map.entry("MISSING_BUTTON", "error.detail.missing_button"),
+			Map.entry("BUTTON_NOT_STONE", "error.detail.button_not_stone"),
+			Map.entry("BUTTON_NOT_ON_PILLAR", "error.detail.button_not_on_pillar"),
+			Map.entry("BUTTON_SUPPORT_NOT_SOLID", "error.detail.button_support_not_solid"),
+			Map.entry("BUTTON_HEIGHT_OUT_OF_RANGE", "error.detail.button_height_out_of_range"),
+			Map.entry("DOCK_NOT_ALIGNED", "error.detail.dock_not_aligned"),
+			Map.entry("PILLAR_DISTANCE_OUT_OF_RANGE", "error.detail.pillar_distance_out_of_range"),
+			Map.entry("NO_RAIL", "error.detail.sign_dock_no_rail"),
+			Map.entry("MULTIPLE_RAILS", "error.detail.sign_dock_multiple_rails"),
+			Map.entry("RAIL_NOT_STRAIGHT", "error.detail.sign_dock_rail_not_straight"),
+			Map.entry("AMBIGUOUS_BOTH_SIDES", "error.detail.sign_dock_ambiguous_both_sides"),
+			Map.entry("LINE_COUNT", "error.detail.sign_line_count"),
+			Map.entry("MISSING_MARKER", "error.detail.sign_missing_marker"),
+			Map.entry("UNSUPPORTED_MARKER", "error.detail.sign_unsupported_marker"),
+			Map.entry("INVALID_MARKER", "error.detail.sign_invalid_marker"),
+			Map.entry("MISSING_FROM", "error.detail.sign_missing_from"),
+			Map.entry("INVALID_FLAGS", "error.detail.sign_invalid_flags"),
+			Map.entry("wall sign required", "error.detail.wall_sign_required"),
+			Map.entry("exactly one wall sign per pillar", "error.detail.one_wall_sign"),
+			Map.entry("a station-only anchor must not have a button", "error.detail.station_only_no_button"),
+			Map.entry("missing stone button", "error.detail.missing_stone_button"),
+			Map.entry("exactly one stone button per pillar", "error.detail.one_stone_button"),
+			Map.entry("local dock is not on the station rail", "error.detail.dock_not_on_station_rail"),
+			Map.entry("blank sign", "error.detail.blank_sign"),
+			Map.entry("missing source name", "error.detail.missing_source_name"),
+			Map.entry("blank destination", "error.detail.blank_destination")
+	);
 
 	private Messages() {
 	}
@@ -73,14 +106,40 @@ public final class Messages {
 	}
 
 	public static String failureText(Lang lang, Failure failure) {
+		return failureText(lang, failure, false);
+	}
+
+	/** Diagnostics/admin rendering keeps the stable code for support reports. */
+	public static String failureTextWithCode(Lang lang, Failure failure) {
+		return failureText(lang, failure, true);
+	}
+
+	private static String failureText(Lang lang, Failure failure, boolean includeCode) {
 		String key = "error." + failure.code().name().toLowerCase(Locale.ROOT);
-		String base = format(lang, key, failure.detail() == null ? "" : failure.detail()).trim();
+		String base = format(lang, key, readableDetail(lang, failure.detail())).trim();
 		StringBuilder text = new StringBuilder(base);
 		if (failure.location() != null) {
 			text.append(" (").append(failure.location().shortString()).append(')');
 		}
-		text.append(" [").append(failure.code().name()).append(']');
+		if (includeCode) {
+			text.append(" [").append(failure.code().name()).append(']');
+		}
 		return text.toString();
+	}
+
+	/** Converts internal enum details into a localized phrase; free text is preserved. */
+	private static String readableDetail(Lang lang, String detail) {
+		if (detail == null || detail.isBlank()) {
+			return "";
+		}
+		String key = DETAIL_KEYS.get(detail);
+		if (key != null) {
+			return format(lang, key);
+		}
+		if (ENUM_DETAIL.matcher(detail).matches()) {
+			return detail.toLowerCase(Locale.ROOT).replace('_', ' ');
+		}
+		return detail;
 	}
 
 	public static void actionBar(ServerPlayer player, String key, Object... args) {

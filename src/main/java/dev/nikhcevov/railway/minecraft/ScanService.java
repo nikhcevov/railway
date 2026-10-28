@@ -215,7 +215,7 @@ public final class ScanService {
 		}
 		Job existing = jobs.get(station.id());
 		if (existing != null && !existing.scanner.isFinished()) {
-			return new StartResult.Rejected(Failure.detail(FailureCode.SCAN_RUNNING, station.id().value()));
+			return new StartResult.Rejected(Failure.detail(FailureCode.SCAN_RUNNING, station.displayName()));
 		}
 		// A real scan always supersedes a shared alias: the station now owns a
 		// job, and until that job completes it must not report the old graph.
@@ -259,15 +259,15 @@ public final class ScanService {
 			// A shared component graph already answers this station; never start
 			// a second scan just because it has no job of its own.
 			return new StartResult.Rejected(Failure.detail(FailureCode.SCAN_RUNNING,
-					id.value() + " (graph already available)"));
+					station.displayName() + " (graph already available)"));
 		}
 		if (isRunning(id)) {
-			return new StartResult.Rejected(Failure.detail(FailureCode.SCAN_RUNNING, id.value()));
+			return new StartResult.Rejected(Failure.detail(FailureCode.SCAN_RUNNING, station.displayName()));
 		}
 		if (!retry.allows(id, tick)) {
 			Failure previous = failure(id);
 			return new StartResult.Rejected(previous != null ? previous
-					: Failure.detail(FailureCode.SCAN_INCOMPLETE, id.value()));
+					: Failure.detail(FailureCode.SCAN_INCOMPLETE, station.displayName()));
 		}
 		StartResult result = start(station, level, config, tick, revision);
 		if (result instanceof StartResult.Started) {
@@ -281,9 +281,9 @@ public final class ScanService {
 	 * Failure reported when an automatic scan was just launched for this attempt.
 	 * The scan runs in the background; the player only needs to try again later.
 	 */
-	public static Failure autoStartedFailure(StationId station) {
+	public static Failure autoStartedFailure(String stationName) {
 		return Failure.detail(FailureCode.SCAN_RUNNING,
-				station.value() + " (scan started automatically)");
+				stationName + " (scan started automatically)");
 	}
 
 	/**

@@ -3,6 +3,7 @@ package dev.nikhcevov.railway.domain;
 /** Structured failure reasons. Human-readable text is produced by the message layer. */
 public enum FailureCode {
 	STATION_NOT_FOUND,
+	STATION_MISSING,
 	STATION_EXISTS,
 	STATION_DISABLED,
 	STATION_HAS_ACTIVE_TRIP,

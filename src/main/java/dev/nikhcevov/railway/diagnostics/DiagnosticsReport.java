@@ -344,7 +344,7 @@ public record DiagnosticsReport(
 		} else if (scan.failure() != null) {
 			text = Messages.format(lang, "diagnostics.scan.failed", scan.jobId(),
 					scan.station().value(), scan.rails(), scan.switches(), scan.revision(),
-					Messages.failureText(lang, scan.failure()));
+					Messages.failureTextWithCode(lang, scan.failure()));
 		} else {
 			text = Messages.format(lang, "diagnostics.scan.complete", scan.jobId(),
 					scan.station().value(), scan.rails(), scan.switches(), scan.revision());

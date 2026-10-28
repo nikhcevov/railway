@@ -277,7 +277,7 @@ public final class RailCommand {
 			return 0;
 		}
 		if (railway.trips().stationInUse(station.id())) {
-			return fail(context.getSource(), Failure.detail(FailureCode.STATION_HAS_ACTIVE_TRIP, station.id().value()));
+			return fail(context.getSource(), Failure.detail(FailureCode.STATION_HAS_ACTIVE_TRIP, station.displayName()));
 		}
 		railway.state().updateStation(station.withEnabled(false, railway.state().nextRevision()));
 		railway.saveState();
@@ -388,7 +388,7 @@ public final class RailCommand {
 			return 0;
 		}
 		if (railway.trips().stationInUse(station.id())) {
-			return fail(context.getSource(), Failure.detail(FailureCode.STATION_HAS_ACTIVE_TRIP, station.id().value()));
+			return fail(context.getSource(), Failure.detail(FailureCode.STATION_HAS_ACTIVE_TRIP, station.displayName()));
 		}
 		List<Binding> removed = railway.state().removeStation(station.id());
 		railway.scans().invalidate(station.id());
@@ -670,7 +670,7 @@ public final class RailCommand {
 			return graph;
 		}
 		if (scans.isRunning(station.id())) {
-			fail(source, Failure.detail(FailureCode.SCAN_RUNNING, station.id().value()));
+			fail(source, Failure.detail(FailureCode.SCAN_RUNNING, station.displayName()));
 			return null;
 		}
 		// No graph and no running job: rebuild the derived graph in the
@@ -680,7 +680,7 @@ public final class RailCommand {
 			ScanService.StartResult started = scans.autoStart(station, level, railway.config(),
 					source.getServer().getTickCount(), railway.state().revision());
 			if (started instanceof ScanService.StartResult.Started) {
-				fail(source, ScanService.autoStartedFailure(station.id()));
+				fail(source, ScanService.autoStartedFailure(station.displayName()));
 				return null;
 			}
 			if (started instanceof ScanService.StartResult.Rejected rejected) {
@@ -689,7 +689,7 @@ public final class RailCommand {
 			}
 		}
 		Failure failure = scans.failure(station.id());
-		fail(source, failure != null ? failure : Failure.detail(FailureCode.SCAN_INCOMPLETE, station.id().value()));
+		fail(source, failure != null ? failure : Failure.detail(FailureCode.SCAN_INCOMPLETE, station.displayName()));
 		return null;
 	}
 

@@ -189,10 +189,10 @@ public final class TripService {
 		Optional<Station> fromOpt = railway.state().station(binding.fromStationId());
 		Optional<Station> toOpt = railway.state().station(binding.toStationId());
 		if (fromOpt.isEmpty()) {
-			return reject(FailureCode.STATION_NOT_FOUND, binding.fromStationId().value());
+			return reject(FailureCode.STATION_MISSING, null);
 		}
 		if (toOpt.isEmpty()) {
-			return reject(FailureCode.STATION_NOT_FOUND, binding.toStationId().value());
+			return reject(FailureCode.STATION_MISSING, null);
 		}
 		Station from = fromOpt.get();
 		Station to = toOpt.get();
@@ -203,10 +203,10 @@ public final class TripService {
 			return reject(FailureCode.DESTINATION_NOT_ANCHORED, to.displayName());
 		}
 		if (!from.enabled()) {
-			return reject(FailureCode.STATION_DISABLED, from.id().value());
+			return reject(FailureCode.STATION_DISABLED, from.displayName());
 		}
 		if (!to.enabled()) {
-			return reject(FailureCode.STATION_DISABLED, to.id().value());
+			return reject(FailureCode.STATION_DISABLED, to.displayName());
 		}
 		if (!to.hasExit()) {
 			return reject(FailureCode.STATION_INCOMPLETE, to.displayName());
@@ -217,7 +217,7 @@ public final class TripService {
 			return reject(FailureCode.WORLD_NOT_LOADED, from.dimension());
 		}
 		if (player.level() != level) {
-			return reject(FailureCode.PLAYER_TOO_FAR, from.id().value());
+			return reject(FailureCode.DIMENSION_MISMATCH, null);
 		}
 		RailWorld world = new RailWorld(level);
 		if (!binding.expectedButtonBlockId().equals(world.blockIdAt(binding.button()))) {
@@ -286,7 +286,7 @@ public final class TripService {
 			return reject(routeFailure);
 		}
 		if (!world.isDockFree(plan.fromDock(), player.getUUID())) {
-			return reject(FailureCode.DOCK_OCCUPIED, from.id().value());
+			return reject(FailureCode.DOCK_OCCUPIED, null);
 		}
 		// If the destination is already loaded, keep failing early on an unsafe
 		// exit. Otherwise the exit is checked once the cart reaches its chunk.
@@ -395,7 +395,7 @@ public final class TripService {
 			return new GraphLookup.Found(graph);
 		}
 		if (scans.isRunning(station.id())) {
-			return new GraphLookup.Failed(Failure.detail(FailureCode.SCAN_RUNNING, station.id().value()));
+			return new GraphLookup.Failed(Failure.detail(FailureCode.SCAN_RUNNING, station.displayName()));
 		}
 		// Graphs are derived and not persisted: after a restart, an invalidation
 		// or a previous failure the first launch must rebuild it in the
@@ -405,7 +405,7 @@ public final class TripService {
 			ScanService.StartResult started = scans.autoStart(station, level, railway.config(),
 					railway.server().getTickCount(), railway.state().revision());
 			if (started instanceof ScanService.StartResult.Started) {
-				return new GraphLookup.Failed(ScanService.autoStartedFailure(station.id()));
+				return new GraphLookup.Failed(ScanService.autoStartedFailure(station.displayName()));
 			}
 			if (started instanceof ScanService.StartResult.Rejected rejected) {
 				return new GraphLookup.Failed(rejected.failure());
@@ -413,7 +413,7 @@ public final class TripService {
 		}
 		Failure scanFailure = scans.failure(station.id());
 		return new GraphLookup.Failed(scanFailure != null ? scanFailure
-				: Failure.detail(FailureCode.SCAN_INCOMPLETE, station.id().value()));
+				: Failure.detail(FailureCode.SCAN_INCOMPLETE, station.displayName()));
 	}
 
 	private StartResult reject(FailureCode code, String detail) {

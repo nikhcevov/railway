@@ -31,7 +31,7 @@
   <g>
     <rect x="82" y="416" width="150" height="42" rx="21" fill="#ff6b6b"/>
     <text x="157" y="444" fill="#07111f" font-family="DejaVu Sans, sans-serif" font-size="19" font-weight="bold" text-anchor="middle" letter-spacing="3">ALPHA</text>
-    <text x="252" y="444" fill="#ffb454" font-family="DejaVu Sans Mono, monospace" font-size="19">0.1.0-alpha.2</text>
+    <text x="252" y="444" fill="#ffb454" font-family="DejaVu Sans Mono, monospace" font-size="19">0.1.0-alpha.3</text>
   </g>
   <g fill="none" stroke="url(#route)" stroke-linecap="round" stroke-linejoin="round">
     <path d="M724 586 C770 462 842 470 890 404 C940 336 1005 360 1072 306 C1118 268 1158 278 1202 250" stroke-width="10" opacity="0.2"/>

@@ -38,31 +38,35 @@ class MessagesTest {
 	}
 
 	@Test
-	void failureTextContainsLocalizedBaseCoordinatesAndCode() {
+	void failureTextContainsLocalizedBaseAndCoordinates() {
 		Failure failure = Failure.at(FailureCode.NO_PATH, new BlockLocation(4, -60, 7));
 
-		assertEquals("No path between these stations on the current network. (4 -60 7) [NO_PATH]",
+		assertEquals("No path between these stations on the current network. (4 -60 7)",
 				Messages.failureText(Messages.Lang.EN, failure));
-		assertEquals("Между станциями нет пути в текущей сети. (4 -60 7) [NO_PATH]",
+		assertEquals("Между станциями нет пути в текущей сети. (4 -60 7)",
 				Messages.failureText(Messages.Lang.RU, failure));
 	}
 
 	@Test
-	void failureTextInterpolatesTheDetailPlaceholder() {
-		Failure failure = Failure.at(FailureCode.STATION_NOT_FOUND, new BlockLocation(0, 64, 0), "home");
+	void failureTextInterpolatesStationNames() {
+		Failure failure = Failure.at(FailureCode.STATION_DISABLED, new BlockLocation(0, 64, 0), "Home");
 
-		assertEquals("Station home not found. (0 64 0) [STATION_NOT_FOUND]",
+		assertEquals("Station Home is disabled. (0 64 0)",
 				Messages.failureText(Messages.Lang.EN, failure));
-		assertEquals("Станция home не найдена. (0 64 0) [STATION_NOT_FOUND]",
+		assertEquals("Станция Home выключена. (0 64 0)",
 				Messages.failureText(Messages.Lang.RU, failure));
 	}
 
 	@Test
-	void failureTextWithoutLocationStillAppendsTheCode() {
-		Failure failure = Failure.of(FailureCode.INTERNAL);
+	void failureTextHidesInternalCodesAndLocalizesSignDetails() {
+		Failure failure = Failure.detail(FailureCode.SIGN_GEOMETRY, "NO_RAIL");
 
-		assertEquals("Internal Railway error. [INTERNAL]", Messages.failureText(Messages.Lang.EN, failure));
-		assertEquals("Внутренняя ошибка Railway. [INTERNAL]", Messages.failureText(Messages.Lang.RU, failure));
+		assertEquals("Invalid sign unit: no rail was found on either side of the sign.",
+				Messages.failureText(Messages.Lang.EN, failure));
+		assertEquals("Неверная геометрия таблички: рядом с табличкой не найден рельс.",
+				Messages.failureText(Messages.Lang.RU, failure));
+		assertEquals("Internal Railway error.",
+				Messages.failureText(Messages.Lang.EN, Failure.of(FailureCode.INTERNAL)));
 	}
 
 	@Test

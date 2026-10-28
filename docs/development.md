@@ -27,7 +27,7 @@ mapping dependency is used.
 ./gradlew runClient             # dev client task (not required by the mod)
 ```
 
-The jar is written to `build/libs/railway-0.1.0-alpha.2.jar`; sources are also
+The jar is written to `build/libs/railway-0.1.0-alpha.3.jar`; sources are also
 built.
 
 Useful test commands:
