@@ -1,64 +1,77 @@
 # Railway production TODO
 
-Status as of 2026-10-28. Keep this file updated when a gate is passed.
+Last updated: 2026-10-29. Current alpha: `0.1.0-alpha.5`.
 
 ## Verified
 
-- [x] Automation: automatic startup scans, one scan per connected component.
-- [x] Scan frontier wider than 32 chunks is processed in bounded subsets.
 - [x] Unit tests: 245 passing.
-- [x] GameTests: 59 passing.
-- [x] Long-route fixture build/verify after restart: 513 rails, 512-block route both directions, destination unloaded before scan, scan auto-loads it, no recovery debris.
-- [x] Mid-trip `kill -9`: recovery closes the checkpoint, removes the managed cart, and does not resume the trip.
-- [x] Clean long-route arrival/return tested by the user on the dedicated fixture server.
-- [x] Alpha icon and 16:9 release banner generated from committed SVG sources.
-- [x] Alpha version `0.1.0-alpha.5` and changelog added.
-- [x] Local `./gradlew modrinth` publishing task and automatic version/tag release workflow added.
+- [x] GameTests: 62 passing.
+- [x] Automatic startup scans, one scan per connected component.
+- [x] Scan frontier wider than 32 chunks is processed in bounded subsets.
+- [x] Long-route fixture: 513 rails, 512-block route both directions, destination unloaded before scan, scan auto-loads it, no recovery debris.
+- [x] Mid-trip `kill -9`: checkpoint closed, managed cart removed, trip not resumed.
+- [x] Clean long-route arrival and return tested by the user on the fixture server.
+- [x] Rail branch placement invalidates stale graphs, so adding a destination pillar no longer fails with a stale `SIGN_GEOMETRY`.
+- [x] Player notifications use station display names for disabled/incomplete/active-trip failures.
+- [x] Internal failure codes are hidden from player chat; `/rail diagnostics` retains them.
+- [x] Sign validation details are localized in English and Russian.
+- [x] Restoring the last destroyed sign re-enables a station with no remaining sign units.
+- [x] An explicitly disabled station with remaining signs stays disabled.
+- [x] Disabled source/destination stations reject actual trips (GameTest coverage).
+- [x] `/rail route check` rejects disabled source/destination stations.
+- [x] Alpha icon, 16:9 banner, changelog, and automatic Modrinth release pipeline.
+- [x] Alpha.5 published to Modrinth and tagged `v0.1.0-alpha.5`.
+- [x] Standalone server booted from downloaded Modrinth jars (alpha.1), then updated through alpha.5 local builds.
 
-## Alpha release
+## Modrinth page — finish manually
 
-- [ ] Create the Modrinth project (or confirm the project slug/ID).
-- [ ] Upload `src/main/resources/assets/railway/icon.png` as the project icon.
-- [ ] Upload `docs/assets/railway-alpha-banner.png` as the first gallery image.
-- [ ] Paste or sync `docs/modrinth-description.md` as the Modrinth project body.
-- [ ] Set GitHub repository variable `MODRINTH_PROJECT_ID`.
-- [ ] Set GitHub Actions secret `MODRINTH_TOKEN` with `CREATE_VERSION`.
-- [x] Build the alpha artifact: `./scripts/build-alpha.sh` (local artifact and checksum produced).
-- [x] Verify the jar contains `fabric.mod.json`, `assets/railway/icon.png`, and no accidental world/state files.
-- [ ] Push the `gradle.properties` version change to `main`; the workflow will publish and tag `v0.1.0-alpha.5`.
-- [ ] Confirm the Modrinth version type is `alpha`, loader `fabric`, environment `server`, game version `26.1.2`.
-- [ ] Check the published jar downloads and starts on a copy world.
+- [ ] Confirm the project icon is `src/main/resources/assets/railway/icon.png`.
+- [ ] Confirm `docs/assets/railway-alpha-banner.png` is in the gallery.
+- [ ] Paste or sync `docs/modrinth-description.md` as the project body.
+- [ ] Confirm the live version is type `alpha`, loader `fabric`, environment `server_only`, game `26.1.2`.
+- [ ] Download the published alpha.5 jar and start it on a fresh copy server.
+- [ ] Check the gallery screenshots/video.
+
+## Remaining P0 checks
+
+- [ ] **Non-OP builder:** builder UUID without OP registers a sign, saves a destination, and starts a trip; an unlisted player is rejected.
+- [ ] **Concurrent trips and turnouts:** several players at once, shared junction conflicts, abort, disconnect, and reconnect; no duplicate carts or stuck reservations.
+- [ ] **Backup/corrupt-state drill:** corrupt `state.json`, stale schema, missing backup, invalid config, failed save/disk conditions.
+- [ ] **Final removal:** remove Railway from a copied world and load it with vanilla; no orphan entities or required custom blocks.
+- [ ] **Copied real-world test:** install alpha.5 on a copy of the production world, build one low-risk two-station route, and run passenger/return/restart cycles.
+- [ ] **Soak test:** leave the copied-world server running for 24 hours with several trips; watch TPS, logs, tickets, and diagnostics.
 
 ## Before beta/stable
 
-- [ ] Non-OP builder acceptance (currently skipped): builder UUID without OP registers a sign and starts a trip; non-builder is rejected.
-- [ ] Concurrent trips and turnouts: several players at once, shared junction conflicts, abort and disconnect behavior, no duplicate carts or stuck reservations.
-- [ ] Backup/corrupt-state drill: corrupt `state.json`, stale schema, missing backup, invalid config, disk/write failure behavior.
-- [ ] Final removal test with the release jar: vanilla server loads a copied world with Railway data but without the mod.
-- [ ] Wide-frontier live fixture, if a non-synthetic connected geometry is found; current coverage is GameTest/unit only.
-- [ ] Remove or exclude the dev-only fixture package and `/railfixture` registration from the production jar. Current alpha jar keeps it dev-gated; docs/fixtures.md lists removal steps.
+- [ ] Wide-frontier live fixture, if a real non-synthetic connected geometry can be built; current coverage is unit/GameTest only.
+- [ ] Remove or exclude the dev-only fixture package and `/railfixture` registration from the production jar.
 - [ ] Re-run the full acceptance matrix on the final jar and pinned dependency versions.
+- [ ] Confirm production configuration limits: `maxActiveTrips`, `maxManagedChunkTickets`, `maxRailsPerScan`, `maxTripTicks`, `maxRouteLength`.
+- [ ] Document the final compatibility matrix and no-generation caveat.
+- [ ] Build the beta/stable artifact, changelog, tag, and Modrinth version.
 
-## Known limitations to document in the release body
+## Known limitations to keep in the project body
 
 - Server-side only; no client mod required.
-- Arrival is at the station main exit; per-origin arrival platforms are not implemented.
+- Arrival is always the station main exit; per-origin arrival platforms are not implemented.
 - No queues, cargo, schedules, portals, custom rails, or GUI.
-- Vanilla chunk-ticket propagation can load an adjacent boundary chunk; Railway itself never requests new chunks or generates during a scan.
+- Vanilla chunk-ticket propagation can load an adjacent boundary chunk. Railway itself never requests new chunks or generates during a scan.
 - Compatibility is tested only on the pinned Minecraft/Fabric/Java versions and the listed server mod stack.
+- The current alpha jar contains dev-gated fixture classes; remove them before beta/stable.
 
 ## Release commands
 
 ```bash
-# Check
+# Automated gate
 ./gradlew build
 ./gradlew runGameTest
 
-# Build local alpha artifact + checksum
+# Local alpha artifact + checksum
 ./scripts/build-alpha.sh
 
-# Publish directly (requires credentials)
+# Direct publish (requires credentials)
 MODRINTH_TOKEN=... MODRINTH_PROJECT_ID=... ./gradlew modrinth
 ```
 
-See `docs/release.md` for the pipeline and asset details.
+Version changes pushed to `main` use the automatic release workflow. See
+[`docs/release.md`](docs/release.md).
