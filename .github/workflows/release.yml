@@ -80,6 +80,7 @@ jobs:
           MODRINTH_EXISTS=false
           if curl -fsSL \
               -H 'User-Agent: railway-github-release' \
+              -H "Authorization: ${MODRINTH_TOKEN}" \
               "https://api.modrinth.com/v2/project/${MODRINTH_PROJECT_ID}/version" \
               -o /tmp/railway-modrinth-versions.json; then
             if jq -e --arg v "$VERSION" 'any(.[]; .version_number == $v)' \
