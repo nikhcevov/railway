@@ -131,8 +131,15 @@ modrinth {
 	uploadFile = tasks.named('jar')
 	gameVersions = [project.minecraft_version.toString()]
 	loaders = ['fabric']
-	environment = 'server'
+	environment = 'server_only'
 	dependencies {
 		required.project 'fabric-api'
 	}
+}
+
+
+// Minotaur resolves project/upload state during execution and is not compatible
+// with Gradle's configuration cache.
+tasks.matching { it.name == 'modrinth' || it.name == 'modrinthSyncBody' }.configureEach {
+	notCompatibleWithConfigurationCache('Minotaur reads project state during execution')
 }

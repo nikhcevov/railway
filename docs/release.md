@@ -26,7 +26,7 @@ Create the project once with:
 - project type: mod;
 - loader: Fabric;
 - Minecraft: `26.1.2`;
-- environment: **server**;
+- environment: **server_only**;
 - license: MIT;
 - icon: `src/main/resources/assets/railway/icon.png`;
 - gallery: `docs/assets/railway-alpha-banner.png`.
@@ -64,7 +64,7 @@ Useful local dry checks:
 - version type `alpha` by default;
 - game version `26.1.2`;
 - loader `fabric`;
-- environment `server`;
+- environment `server_only`;
 - required dependency Fabric API;
 - changelog from `CHANGELOG.md`.
 
