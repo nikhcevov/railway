@@ -241,3 +241,10 @@ remains available to force a rescan and wait for a job ID.
 | `CHUNKS_NOT_READY` | Chunk window did not become entity-ticking; inspect diagnostics/tickets |
 | `RECOVERY_PENDING` | Wait for startup reconciliation to finish; inspect diagnostics |
 | `PERMISSION` | Use OP2 or add builder UUID to config for signs |
+
+## Dev-only acceptance fixtures
+
+`/railfixture` is not a production command. In a Fabric development environment
+(or with `-Drailway.fixtures=true`) it builds and verifies real acceptance
+worlds for unloaded chunks, long routes, and `kill -9` recovery. See
+[`fixtures.md`](fixtures.md).

@@ -12,6 +12,52 @@ repositories {
 
 loom {
 	serverOnlyMinecraftJar()
+	runs {
+		fixtureServer {
+			server()
+			name = "Fixture Server"
+			runDir = "run/fixture-kill9"
+		}
+	}
+}
+
+// Build metadata consumed by the dev-only fixture reports. Production code
+// ignores it unless the fixture surface is enabled.
+def buildInfoDir = layout.buildDirectory.dir('generated/build-info')
+def generateBuildInfo = tasks.register('generateBuildInfo') {
+	def outputDir = buildInfoDir
+	def projectPath = projectDir
+	def projectVersion = project.version.toString()
+	outputs.dir(outputDir)
+	// git HEAD can change without any tracked input changing; refresh every build.
+	outputs.upToDateWhen { false }
+	doLast {
+		String commit = 'unknown'
+		try {
+			Process process = new ProcessBuilder('git', 'rev-parse', 'HEAD')
+					.directory(projectPath)
+					.redirectErrorStream(true)
+					.start()
+			String text = process.inputStream.getText('UTF-8').trim()
+			if (process.waitFor() == 0 && !text.isEmpty()) {
+				commit = text
+			}
+		} catch (Exception ignored) {
+			// A source archive without .git still builds; the report says unknown.
+		}
+		File output = outputDir.get().file('railway-build.properties').asFile
+		output.parentFile.mkdirs()
+		output.text = "version=${projectVersion}\ncommit=${commit}\n"
+	}
+}
+sourceSets.main.resources.srcDir(buildInfoDir)
+tasks.named('processResources') {
+	dependsOn generateBuildInfo
+}
+// The generated metadata is part of main resources, so the source jar sees the
+// same directory. Declare the dependency instead of relying on task order.
+tasks.matching { it.name == 'sourcesJar' }.configureEach {
+	dependsOn generateBuildInfo
 }
 
 dependencies {

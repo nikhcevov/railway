@@ -60,6 +60,7 @@ and Clumps; verify behavior under any other combination.
 | `sign` | pure sign parsing, pillar/dock geometry, validation |
 | `commands` | Brigadier surface and message catalogs |
 | `diagnostics` | read-only operations report |
+| `fixture` | dev-only `/railfixture` generator, verifier, and reports |
 | `mixin` | sign-save and managed-cart hooks |
 
 No custom blocks, items, or entities are registered. Stations are vanilla rails,
@@ -130,6 +131,19 @@ Server integration tests using Fabric GameTest and a real Minecraft server:
 GameTests should exercise the same hooks as production (for example
 `SignBlockEntity.updateSignText`), not only call service methods directly.
 
+### Dev-only acceptance fixtures
+
+`/railfixture` builds real worlds for cases the GameTest plot cannot model:
+unloaded destination chunks, a 512-block route, restart unload, and `kill -9`
+mid-trip. It is gated by `FabricLoader.isDevelopmentEnvironment()` /
+`-Drailway.fixtures=true`, writes deterministic JSON under `fixtures/`, and is
+deleted before a release. See [`fixtures.md`](fixtures.md).
+
+```bash
+./gradlew runFixtureServer          # dedicated run/fixture-kill9 server
+./scripts/fixture-kill9.sh          # build, manual trip, kill -9, restart, verify
+```
+
 ## Adding a command or message
 
 1. Register the command in `RailCommand` with the appropriate permission.
@@ -153,8 +167,11 @@ GameTests should exercise the same hooks as production (for example
 See [`stage-5-report.md`](stage-5-report.md) and
 [`operations.md`](operations.md). Notably:
 
-- no true long-route-beyond-simulation-distance run yet;
-- no true mid-trip `kill -9` run with a real client;
+- the dev-only `long-route-unloaded` fixture and `kill -9` harness now exist,
+  but a real-client pass still has to be performed manually;
+- `wide-frontier` is not generated because a real rail graph cannot expose
+  more than 32 unloaded frontier chunks without a force-loaded hub and dead-end
+  stubs; selector coverage remains in GameTests/unit tests;
 - vanilla ticket propagation may load an adjacent missing chunk;
 - diagnostics output is unpaginated;
 - no client-side UI or resource pack.

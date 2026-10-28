@@ -3,6 +3,9 @@ package dev.nikhcevov.railway;
 import dev.nikhcevov.railway.commands.Messages;
 import dev.nikhcevov.railway.commands.RailCommand;
 import dev.nikhcevov.railway.domain.Binding;
+import dev.nikhcevov.railway.fixture.FixtureCommand;
+import dev.nikhcevov.railway.fixture.FixtureEnvironment;
+import dev.nikhcevov.railway.fixture.FixtureService;
 import dev.nikhcevov.railway.minecraft.PlayerActions;
 import dev.nikhcevov.railway.minecraft.RailWorld;
 import dev.nikhcevov.railway.minecraft.Railway;
@@ -60,6 +63,14 @@ public final class RailwayMod implements ModInitializer {
 				railway.signs().verifyMarkers(server);
 			}
 		});
+		// Dev-only acceptance fixtures. The package and this single block are
+		// deleted before a release; production jars never register the command.
+		if (FixtureEnvironment.enabled()) {
+			CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) ->
+					FixtureCommand.register(dispatcher));
+			ServerTickEvents.END_SERVER_TICK.register(FixtureService::tick);
+			ServerLifecycleEvents.SERVER_STOPPING.register(server -> FixtureService.reset());
+		}
 		// Entity-ticking is the first moment a recovered chunk can be trusted to
 		// contain (or not contain) the checkpointed cart.
 		ServerChunkEvents.FULL_CHUNK_STATUS_CHANGE.register((level, chunk, oldStatus, newStatus) -> {
