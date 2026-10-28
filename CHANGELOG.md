@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.0-alpha.5 — 2026-10-29
+
+- `/rail route check` now rejects disabled source or destination stations with
+  the station display name. Actual passenger trips already enforced this.
+- Added GameTest coverage for disabled source and destination trips.
+
 ## 0.1.0-alpha.4 — 2026-10-28
 
 - Restoring the last destroyed sign with the same station name re-enables the

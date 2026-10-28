@@ -90,7 +90,7 @@ Override the channel for a later beta/release:
 changes on `main`. Changing `version=` is the only required action:
 
 ```properties
-version=0.1.0-alpha.4
+version=0.1.0-alpha.5
 ```
 
 Commit and push that change. The workflow:

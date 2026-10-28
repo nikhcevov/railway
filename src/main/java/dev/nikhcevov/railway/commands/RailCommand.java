@@ -614,6 +614,12 @@ public final class RailCommand {
 		if (!to.hasExit()) {
 			return fail(source, Failure.detail(FailureCode.STATION_INCOMPLETE, to.displayName()));
 		}
+		if (!from.enabled()) {
+			return fail(source, Failure.detail(FailureCode.STATION_DISABLED, from.displayName()));
+		}
+		if (!to.enabled()) {
+			return fail(source, Failure.detail(FailureCode.STATION_DISABLED, to.displayName()));
+		}
 		// One scan covers its whole connected component. Reuse it when it already
 		// contains the other endpoint, so a missing destination scan does not hide a
 		// route that the source graph proves.

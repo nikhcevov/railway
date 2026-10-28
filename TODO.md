@@ -12,7 +12,7 @@ Status as of 2026-10-28. Keep this file updated when a gate is passed.
 - [x] Mid-trip `kill -9`: recovery closes the checkpoint, removes the managed cart, and does not resume the trip.
 - [x] Clean long-route arrival/return tested by the user on the dedicated fixture server.
 - [x] Alpha icon and 16:9 release banner generated from committed SVG sources.
-- [x] Alpha version `0.1.0-alpha.4` and changelog added.
+- [x] Alpha version `0.1.0-alpha.5` and changelog added.
 - [x] Local `./gradlew modrinth` publishing task and automatic version/tag release workflow added.
 
 ## Alpha release
@@ -25,7 +25,7 @@ Status as of 2026-10-28. Keep this file updated when a gate is passed.
 - [ ] Set GitHub Actions secret `MODRINTH_TOKEN` with `CREATE_VERSION`.
 - [x] Build the alpha artifact: `./scripts/build-alpha.sh` (local artifact and checksum produced).
 - [x] Verify the jar contains `fabric.mod.json`, `assets/railway/icon.png`, and no accidental world/state files.
-- [ ] Push the `gradle.properties` version change to `main`; the workflow will publish and tag `v0.1.0-alpha.4`.
+- [ ] Push the `gradle.properties` version change to `main`; the workflow will publish and tag `v0.1.0-alpha.5`.
 - [ ] Confirm the Modrinth version type is `alpha`, loader `fabric`, environment `server`, game version `26.1.2`.
 - [ ] Check the published jar downloads and starts on a copy world.
 

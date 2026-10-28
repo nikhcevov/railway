@@ -52,6 +52,39 @@ public final class RailwayGameTests implements CustomTestMethodInvoker {
 		assertArrival(helper, fixture, player, fixture.mineExit, trip);
 	}
 
+	@GameTest(maxTicks = 200)
+	public void disabledStationsRejectTripsWithNames(GameTestHelper helper) {
+		Fixture fixture = buildFixture(helper, "disabled");
+		ServerPlayer player = fixture.newPlayer(helper, fixture.homeExit);
+		Railway railway = fixture.railway();
+		long revision = railway.state().nextRevision();
+		railway.state().updateStation(fixture.home().withEnabled(false, revision));
+
+		TripService.StartResult fromDisabled = railway.trips().start(player, fixture.homeToMine);
+		if (!(fromDisabled instanceof TripService.StartResult.Rejected rejected)
+				|| rejected.failure().code() != FailureCode.STATION_DISABLED) {
+			throw helper.assertionException("disabled source station did not reject the trip: " + fromDisabled);
+		}
+		if (!fixture.home().displayName().equals(rejected.failure().detail())) {
+			throw helper.assertionException("disabled source failure did not use the station name: "
+					+ rejected.failure().detail());
+		}
+
+		revision = railway.state().nextRevision();
+		railway.state().updateStation(fixture.home().withEnabled(true, revision));
+		railway.state().updateStation(fixture.mine().withEnabled(false, revision));
+		TripService.StartResult toDisabled = railway.trips().start(player, fixture.homeToMine);
+		if (!(toDisabled instanceof TripService.StartResult.Rejected destinationRejected)
+				|| destinationRejected.failure().code() != FailureCode.STATION_DISABLED) {
+			throw helper.assertionException("disabled destination station did not reject the trip: " + toDisabled);
+		}
+		if (!fixture.mine().displayName().equals(destinationRejected.failure().detail())) {
+			throw helper.assertionException("disabled destination failure did not use the station name: "
+					+ destinationRejected.failure().detail());
+		}
+		helper.succeed();
+	}
+
 	@GameTest(maxTicks = 600)
 	public void passengerTravelsMineToHome(GameTestHelper helper) {
 		Fixture fixture = buildFixture(helper, "r");
