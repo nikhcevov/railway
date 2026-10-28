@@ -11,6 +11,7 @@ repository.
 | Mod icon, 512×512 | `src/main/resources/assets/railway/icon.png` |
 | Alpha banner, 1280×720 | `docs/assets/railway-alpha-banner.png` |
 | Vector sources | `src/main/resources/assets/railway/icon.svg`, `docs/assets/railway-alpha-banner.svg` |
+| Extended Modrinth body | `docs/modrinth-description.md` |
 | Release jar | `build/libs/railway-<version>.jar` |
 | Checksum | `dist/railway-<version>.jar.sha256` |
 
@@ -30,8 +31,10 @@ Create the project once with:
 - icon: `src/main/resources/assets/railway/icon.png`;
 - gallery: `docs/assets/railway-alpha-banner.png`.
 
-The Gradle task publishes versions, not the project body or gallery. Upload the
-icon, banner, description, and links through the Modrinth project settings.
+The Gradle task publishes versions. The project body is sourced from
+`docs/modrinth-description.md`; run `./gradlew modrinthSyncBody` only when you
+intend to overwrite the live Modrinth body. Upload the icon, banner, and gallery
+through the Modrinth project settings.
 
 ## Local alpha build
 

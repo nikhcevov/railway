@@ -127,6 +127,7 @@ modrinth {
 	changelog = rootProject.file('CHANGELOG.md').exists()
 			? rootProject.file('CHANGELOG.md').getText('UTF-8')
 			: "Railway ${project.version}"
+	syncBodyFrom = rootProject.file('docs/modrinth-description.md').getText('UTF-8')
 	uploadFile = tasks.named('jar')
 	gameVersions = [project.minecraft_version.toString()]
 	loaders = ['fabric']

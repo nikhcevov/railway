@@ -227,6 +227,7 @@ See [`docs/operations.md`](docs/operations.md).
 - [Operations and recovery](docs/operations.md)
 - [Development and testing](docs/development.md)
 - [Release pipeline and Modrinth](docs/release.md)
+- [Extended Modrinth description](docs/modrinth-description.md)
 - [Acceptance fixtures](docs/fixtures.md)
 - [Production TODO](TODO.md)
 - [Implementation specification](Railway-Spec-v1.md) (Russian)

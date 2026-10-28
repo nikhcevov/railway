@@ -20,6 +20,7 @@ Status as of 2026-10-28. Keep this file updated when a gate is passed.
 - [ ] Create the Modrinth project (or confirm the project slug/ID).
 - [ ] Upload `src/main/resources/assets/railway/icon.png` as the project icon.
 - [ ] Upload `docs/assets/railway-alpha-banner.png` as the first gallery image.
+- [ ] Paste or sync `docs/modrinth-description.md` as the Modrinth project body.
 - [ ] Set GitHub repository variable `MODRINTH_PROJECT_ID`.
 - [ ] Set GitHub Actions secret `MODRINTH_TOKEN` with `CREATE_VERSION`.
 - [x] Build the alpha artifact: `./scripts/build-alpha.sh` (local artifact and checksum produced).
