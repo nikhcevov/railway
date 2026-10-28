@@ -86,42 +86,49 @@ Override the channel for a later beta/release:
 
 ### Release
 
-`.github/workflows/release.yml` supports:
+`.github/workflows/release.yml` runs automatically when `gradle.properties`
+changes on `main`. Changing `version=` is the only required action:
 
-- manual `workflow_dispatch` with a version and channel;
-- a `v*` tag.
+```properties
+version=0.1.0-alpha.2
+```
 
-Configure the repository:
+Commit and push that change. The workflow:
+
+1. reads the version from `gradle.properties`;
+2. derives the channel from the suffix: `-alpha` → alpha, `-beta` → beta,
+   otherwise release;
+3. checks whether the Modrinth version already exists;
+4. checks whether tag `v<version>` already exists;
+5. builds and runs GameTests only when the Modrinth version is new;
+6. publishes to Modrinth;
+7. creates and pushes annotated tag `v<version>` only after publishing succeeds;
+8. uploads the jar as a workflow artifact.
+
+The order is deliberate. If publishing succeeds but the tag push fails, re-run
+the workflow: it detects the existing Modrinth version, skips the upload, and
+creates the missing tag. If the tag exists but the Modrinth version does not, the
+workflow publishes it.
+
+`workflow_dispatch` is available for retries. Do not create the release tag
+manually unless recovery requires it.
+
+Configure the repository once:
 
 | Name | Kind | Value |
 |---|---|---|
 | `MODRINTH_TOKEN` | Actions secret | Modrinth token with `CREATE_VERSION` |
 | `MODRINTH_PROJECT_ID` | Actions variable | Modrinth project ID or slug |
 
-Then run the workflow manually:
-
-```text
-version: 0.1.0-alpha.1
-channel: alpha
-```
-
-or push a tag:
-
-```bash
-git tag v0.1.0-alpha.1
-git push origin v0.1.0-alpha.1
-```
-
-The workflow checks out, builds, runs GameTests, publishes to Modrinth, and
-uploads the jar as a workflow artifact. It does not create a GitHub release.
+The workflow requires both. It does not create a GitHub release.
 
 ## Version bump
 
-1. Update `version=` in `gradle.properties`.
-2. Add a `CHANGELOG.md` section.
-3. Update the README version/installation names.
-4. Run `./scripts/build-alpha.sh`.
-5. Publish a new Modrinth version; never reuse an existing Modrinth version.
+1. Change `version=` in `gradle.properties`.
+2. Recommend updating `CHANGELOG.md` in the same commit.
+3. Commit and push to `main`; the release workflow handles the rest.
+
+Never reuse an existing Modrinth version number.
 
 ## Production cleanup
 
