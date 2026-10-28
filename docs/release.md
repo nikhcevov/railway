@@ -66,7 +66,7 @@ Useful local dry checks:
 - loader `fabric`;
 - environment `server_only`;
 - required dependency Fabric API;
-- changelog from `CHANGELOG.md`.
+- only the matching version section from `CHANGELOG.md`.
 
 Override the channel for a later beta/release:
 
@@ -109,6 +109,22 @@ The order is deliberate. If publishing succeeds but the tag push fails, re-run
 the workflow: it detects the existing Modrinth version, skips the upload, and
 creates the missing tag. If the tag exists but the Modrinth version does not, the
 workflow publishes it.
+
+### Per-version changelogs
+
+Modrinth displays a version changelog, not the whole repository history. Minotaur
+extracts only the section matching `version=` from `CHANGELOG.md`; the full
+history stays in the repository.
+
+To repair already-published versions that contain the full history, run:
+
+```bash
+MODRINTH_TOKEN=... MODRINTH_PROJECT_ID=... python3 scripts/update-modrinth-changelogs.py --apply
+```
+
+The script dry-runs by default. The token needs `VERSION_WRITE` in addition to
+`CREATE_VERSION`. The `fix-modrinth-changelogs` workflow performs the same repair
+using the repository secret and variable.
 
 `workflow_dispatch` is available for retries. Do not create the release tag
 manually unless recovery requires it.

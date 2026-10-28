@@ -115,6 +115,49 @@ tasks.named('runGameTest') {
 	}
 }
 
+// Modrinth displays one version's changelog. Extract only that version's section
+// from the repository CHANGELOG instead of uploading the whole history.
+def changelogForVersion = { String version ->
+	def file = rootProject.file('CHANGELOG.md')
+	if (!file.exists()) {
+		return "Railway ${version}"
+	}
+	def lines = file.readLines('UTF-8')
+	int start = -1
+	for (int i = 0; i < lines.size(); i++) {
+		String line = lines[i].trim()
+		if (!line.startsWith('## ')) {
+			continue
+		}
+		String heading = line.substring(3).trim()
+		String headingVersion = heading.split('\\s+', 2)[0]
+		if (headingVersion == version) {
+			start = i
+			break
+		}
+	}
+	if (start < 0) {
+		return "Railway ${version}"
+	}
+	int end = lines.size()
+	for (int i = start + 1; i < lines.size(); i++) {
+		if (lines[i].trim().startsWith('## ')) {
+			end = i
+			break
+		}
+	}
+	String body = lines.subList(start + 1, end).join('\n').trim()
+	return body.isEmpty() ? "Railway ${version}" : body
+}
+
+def printChangelogVersion = project.version.toString()
+def printChangelogText = changelogForVersion(printChangelogVersion)
+tasks.register('printModrinthChangelog') {
+	doLast {
+		println printChangelogText
+	}
+}
+
 // Modrinth publishing. `./gradlew modrinth` uploads the remapped release jar.
 // Requires MODRINTH_TOKEN and MODRINTH_PROJECT_ID. The release workflow supplies
 // both; local builds do not need them.
@@ -124,9 +167,7 @@ modrinth {
 	versionNumber = project.version.toString()
 	versionName = "Railway ${project.version}"
 	versionType = project.findProperty('modrinthVersionType') ?: 'alpha'
-	changelog = rootProject.file('CHANGELOG.md').exists()
-			? rootProject.file('CHANGELOG.md').getText('UTF-8')
-			: "Railway ${project.version}"
+	changelog = changelogForVersion(project.version.toString())
 	syncBodyFrom = rootProject.file('docs/modrinth-description.md').getText('UTF-8')
 	uploadFile = tasks.named('jar')
 	gameVersions = [project.minecraft_version.toString()]
