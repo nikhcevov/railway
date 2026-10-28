@@ -1,0 +1,60 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#06101c"/>
+      <stop offset="0.55" stop-color="#0c2236"/>
+      <stop offset="1" stop-color="#07141e"/>
+    </linearGradient>
+    <linearGradient id="route" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#69e7ff"/>
+      <stop offset="0.55" stop-color="#9cf3c4"/>
+      <stop offset="1" stop-color="#ffb454"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.74" cy="0.5" r="0.58">
+      <stop offset="0" stop-color="#1dd3ff" stop-opacity="0.16"/>
+      <stop offset="1" stop-color="#1dd3ff" stop-opacity="0"/>
+    </radialGradient>
+    <pattern id="grid" width="48" height="48" patternUnits="userSpaceOnUse">
+      <path d="M48 0H0V48" fill="none" stroke="#9cf3c4" stroke-opacity="0.055" stroke-width="1"/>
+    </pattern>
+  </defs>
+  <rect width="1280" height="720" fill="url(#bg)"/>
+  <rect width="1280" height="720" fill="url(#grid)"/>
+  <rect width="1280" height="720" fill="url(#glow)"/>
+  <g opacity="0.18" fill="none" stroke="#9cf3c4" stroke-width="1">
+    <path d="M0 80h1280M0 160h1280M0 240h1280M0 320h1280M0 400h1280M0 480h1280M0 560h1280M0 640h1280"/>
+  </g>
+  <text x="82" y="110" fill="#69e7ff" font-family="DejaVu Sans Mono, monospace" font-size="20" letter-spacing="7">SERVER-SIDE FABRIC MOD</text>
+  <text x="78" y="262" fill="#f5f7ff" font-family="DejaVu Sans, sans-serif" font-size="106" font-weight="bold" letter-spacing="5">RAILWAY</text>
+  <text x="82" y="326" fill="#9fb0c9" font-family="DejaVu Sans, sans-serif" font-size="30">Automated passenger minecart transit</text>
+  <text x="82" y="366" fill="#9fb0c9" font-family="DejaVu Sans, sans-serif" font-size="30">over player-built vanilla rails.</text>
+  <g>
+    <rect x="82" y="416" width="150" height="42" rx="21" fill="#ff6b6b"/>
+    <text x="157" y="444" fill="#07111f" font-family="DejaVu Sans, sans-serif" font-size="19" font-weight="bold" text-anchor="middle" letter-spacing="3">ALPHA</text>
+    <text x="252" y="444" fill="#ffb454" font-family="DejaVu Sans Mono, monospace" font-size="19">0.1.0-alpha.1</text>
+  </g>
+  <g fill="none" stroke="url(#route)" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M724 586 C770 462 842 470 890 404 C940 336 1005 360 1072 306 C1118 268 1158 278 1202 250" stroke-width="10" opacity="0.2"/>
+    <path d="M724 586 C770 462 842 470 890 404 C940 336 1005 360 1072 306 C1118 268 1158 278 1202 250" stroke-width="5"/>
+  </g>
+  <g fill="#07111f" stroke="#69e7ff" stroke-width="6">
+    <circle cx="724" cy="586" r="15"/>
+    <circle cx="890" cy="404" r="15"/>
+    <circle cx="1072" cy="306" r="15"/>
+    <circle cx="1202" cy="250" r="15"/>
+  </g>
+  <g fill="#f5f7ff" font-family="DejaVu Sans Mono, monospace" font-size="16">
+    <text x="696" y="628">HOME</text>
+    <text x="862" y="446">GARDEN</text>
+    <text x="1040" y="348">HILL</text>
+    <text x="1172" y="222">FARAWAY</text>
+  </g>
+  <g transform="translate(916 236) rotate(-12)">
+    <rect x="-34" y="-22" width="68" height="44" rx="9" fill="#f5f7ff"/>
+    <rect x="-24" y="-12" width="48" height="18" rx="5" fill="#0b1c2d"/>
+    <circle cx="-17" cy="26" r="9" fill="#0b1c2d" stroke="#69e7ff" stroke-width="4"/>
+    <circle cx="17" cy="26" r="9" fill="#0b1c2d" stroke="#69e7ff" stroke-width="4"/>
+  </g>
+  <text x="82" y="668" fill="#6e8199" font-family="DejaVu Sans, sans-serif" font-size="19">Minecraft 26.1.2  ·  Fabric Loader 0.20.1  ·  Java 25</text>
+  <text x="1200" y="668" fill="#6e8199" font-family="DejaVu Sans Mono, monospace" font-size="17" text-anchor="end">NO CLIENT MOD</text>
+</svg>

@@ -8,6 +8,7 @@
 		"nikhcevov"
 	],
 	"license": "MIT",
+	"icon": "assets/railway/icon.png",
 	"environment": "server",
 	"entrypoints": {
 		"main": [

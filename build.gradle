@@ -1,5 +1,6 @@
 plugins {
 	id 'net.fabricmc.fabric-loom' version "${loom_version}"
+	id 'com.modrinth.minotaur' version '2.10.0'
 }
 
 base {
@@ -111,5 +112,26 @@ tasks.named('runGameTest') {
 		if (stateFile.isFile()) {
 			stateFile.delete()
 		}
+	}
+}
+
+// Modrinth publishing. `./gradlew modrinth` uploads the remapped release jar.
+// Requires MODRINTH_TOKEN and MODRINTH_PROJECT_ID. The release workflow supplies
+// both; local builds do not need them.
+modrinth {
+	token = System.getenv('MODRINTH_TOKEN')
+	projectId = System.getenv('MODRINTH_PROJECT_ID') ?: ''
+	versionNumber = project.version.toString()
+	versionName = "Railway ${project.version}"
+	versionType = project.findProperty('modrinthVersionType') ?: 'alpha'
+	changelog = rootProject.file('CHANGELOG.md').exists()
+			? rootProject.file('CHANGELOG.md').getText('UTF-8')
+			: "Railway ${project.version}"
+	uploadFile = tasks.named('jar')
+	gameVersions = [project.minecraft_version.toString()]
+	loaders = ['fabric']
+	environment = 'server'
+	dependencies {
+		required.project 'fabric-api'
 	}
 }

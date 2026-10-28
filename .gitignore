@@ -1,3 +1,6 @@
+# release artifacts
+dist/
+
 # gradle
 .gradle/
 build/

@@ -1,5 +1,7 @@
 # Railway
 
+![Railway alpha banner](docs/assets/railway-alpha-banner.png)
+
 Railway is a server-side Fabric mod for automated passenger minecart travel over
 player-built vanilla rails. A passenger presses a registered stone button; Railway
 spawns a service cart, seats the passenger, routes it over the scanned rail graph,
@@ -14,8 +16,8 @@ carts, routing, reservations, recovery, and diagnostics.
 - Java: **25+**
 - License: **MIT**
 
-Current version: `0.1.0-SNAPSHOT`. This is a development build. Test on a
-backup world before using it on a world you care about.
+Current version: `0.1.0-alpha.1`. This is an alpha build. Test on a backup
+world before using it on a world you care about.
 
 ## Status
 
@@ -36,7 +38,7 @@ summary and remaining limitations.
 ## Install
 
 1. Create or use a Fabric **server** with the versions above.
-2. Put `railway-0.1.0-SNAPSHOT.jar` and the matching Fabric API in the server
+2. Put `railway-0.1.0-alpha.1.jar` and the matching Fabric API in the server
    `mods/` directory.
 3. Start the server once. Railway creates `config/railway.json`.
 4. Adjust the config if needed, then `/rail reload` or restart.
@@ -49,8 +51,11 @@ To build from source:
 
 ```bash
 ./gradlew build
-# server jar: build/libs/railway-0.1.0-SNAPSHOT.jar
+# server jar: build/libs/railway-0.1.0-alpha.1.jar
 ```
+
+Alpha release pipeline and Modrinth setup: [`docs/release.md`](docs/release.md).
+Remaining production gates: [`TODO.md`](TODO.md).
 
 ## Quick start: a three-pillar station
 
@@ -221,6 +226,9 @@ See [`docs/operations.md`](docs/operations.md).
 - [Configuration](docs/configuration.md)
 - [Operations and recovery](docs/operations.md)
 - [Development and testing](docs/development.md)
+- [Release pipeline and Modrinth](docs/release.md)
+- [Acceptance fixtures](docs/fixtures.md)
+- [Production TODO](TODO.md)
 - [Implementation specification](Railway-Spec-v1.md) (Russian)
 - [Stage 4 sign model](docs/stage-4-signs.md)
 - [Stage 4.1 chain/local/main model](docs/stage-4-chain-local.md)
