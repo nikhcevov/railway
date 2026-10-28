@@ -619,6 +619,30 @@ public final class RailwayGameTests implements CustomTestMethodInvoker {
 	}
 
 	/**
+	 * A new branch starts outside the old graph. Placing its first rail must
+	 * invalidate the stale component graph, otherwise sign registration rejects the
+	 * new local dock with SIGN_GEOMETRY before a rescan can run.
+	 */
+	@GameTest(maxTicks = 200)
+	public void placingAdjacentRailInvalidatesScannedGraph(GameTestHelper helper) {
+		Fixture fixture = buildFixture(helper, "inval");
+		ScanService scans = fixture.railway().scans();
+		if (scans.graph(fixture.home().id()) == null || scans.graph(fixture.mine().id()) == null) {
+			throw helper.assertionException("fixture graphs were not scanned");
+		}
+
+		helper.setBlock(new BlockPos(3, 0, 1), Blocks.STONE);
+		BlockPos branchRail = helper.absolutePos(new BlockPos(3, 1, 1));
+		helper.getLevel().setBlock(branchRail, Blocks.RAIL.defaultBlockState()
+				.setValue(RailBlock.SHAPE, RailShape.NORTH_SOUTH), 2);
+
+		if (scans.graph(fixture.home().id()) != null || scans.graph(fixture.mine().id()) != null) {
+			throw helper.assertionException("placing a rail branch did not invalidate the old graph");
+		}
+		helper.succeed();
+	}
+
+	/**
 	 * Starts a trip on the next tick that has a free active-trip slot. The shared
 	 * GameTest server runs many tests at once, so a direct start may see TRIP_LIMIT.
 	 */

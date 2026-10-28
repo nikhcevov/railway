@@ -1,6 +1,10 @@
 # release artifacts
 dist/
 
+# jars placed in the repository root for manual server testing
+/railway-*.jar
+/fabric-api-*.jar
+
 # gradle
 .gradle/
 build/
@@ -17,6 +21,7 @@ classes/
 
 # dev server + client run dirs
 run/
+server-modrinth/
 
 # macos
 *.DS_Store

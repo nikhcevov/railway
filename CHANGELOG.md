@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.0-alpha.2 — 2026-10-28
+
+- Invalidate the scanned component graph when a rail is placed, removed, or
+  replaced next to an existing component. Adding a new branch no longer leaves a
+  stale graph that rejects the new destination sign with `SIGN_GEOMETRY`.
+- The invalidation is limited to graphs adjacent to the changed rail, so separate
+  networks and GameTest plots do not invalidate each other.
+
 ## 0.1.0-alpha.1 — 2026-10-28
 
 Initial public alpha of Railway, a server-side Fabric mod for automated passenger

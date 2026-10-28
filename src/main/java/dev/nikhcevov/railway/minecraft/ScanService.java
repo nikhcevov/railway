@@ -737,6 +737,43 @@ public final class ScanService {
 		}
 	}
 
+	/**
+	 * Invalidates completed component graphs that contain the changed position or
+	 * a rail directly adjacent to it. A newly placed branch starts outside the old
+	 * graph, so exact-position invalidation alone would leave a stale component
+	 * that rejects the new sign with SIGN_GEOMETRY.
+	 */
+	public void invalidateAdjacent(ServerLevel level, BlockLocation location) {
+		Set<StationId> affected = new LinkedHashSet<>();
+		for (Job job : jobs.values()) {
+			if (job.level != level || job.graph == null) {
+				continue;
+			}
+			if (job.graph.rail(location) != null || hasAdjacentRail(job.graph, location)) {
+				affected.add(job.station);
+			}
+		}
+		for (StationId owner : affected) {
+			invalidateShared(owner);
+		}
+	}
+
+	private static boolean hasAdjacentRail(RailGraph graph, BlockLocation pos) {
+		for (int dx = -1; dx <= 1; dx++) {
+			for (int dz = -1; dz <= 1; dz++) {
+				if (Math.abs(dx) + Math.abs(dz) != 1) {
+					continue;
+				}
+				for (int dy = -1; dy <= 1; dy++) {
+					if (graph.rail(new BlockLocation(pos.x() + dx, pos.y() + dy, pos.z() + dz)) != null) {
+						return true;
+					}
+				}
+			}
+		}
+		return false;
+	}
+
 	public void clear() {
 		for (Job job : jobs.values()) {
 			discard(job);
