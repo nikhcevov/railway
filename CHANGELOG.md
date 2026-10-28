@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.0-alpha.4 — 2026-10-28
+
+- Restoring the last destroyed sign with the same station name re-enables the
+  station when it has no sign units left. An admin-disabled station that still
+  has signs remains disabled.
+- Command success messages for exit, rename, enable, disable, remove, and button
+  binding use station display names.
+- Restored stations report `Station <name> re-enabled.` in chat.
+
 ## 0.1.0-alpha.3 — 2026-10-28
 
 - Player-facing failures now show station display names instead of internal IDs.

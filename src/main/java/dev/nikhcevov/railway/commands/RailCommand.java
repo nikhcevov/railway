@@ -209,7 +209,7 @@ public final class RailCommand {
 		Station updated = station.withExit(exit, player.getYRot(), railway.state().nextRevision());
 		railway.state().updateStation(updated);
 		railway.saveState();
-		return ok(context.getSource(), "station.exit_set", station.id().value(), exit.shortString());
+		return ok(context.getSource(), "station.exit_set", station.displayName(), exit.shortString());
 	}
 
 	private static int stationRename(CommandContext<CommandSourceStack> context) {
@@ -235,7 +235,7 @@ public final class RailCommand {
 		}
 		railway.state().updateStation(station.withDisplayName(name, railway.state().nextRevision()));
 		railway.saveState();
-		return ok(context.getSource(), "station.renamed", station.id().value(), name);
+		return ok(context.getSource(), "station.renamed", station.displayName(), name);
 	}
 
 	private static int stationEnable(CommandContext<CommandSourceStack> context) {
@@ -264,7 +264,7 @@ public final class RailCommand {
 		}
 		railway.state().updateStation(station.withEnabled(true, railway.state().nextRevision()));
 		railway.saveState();
-		return ok(context.getSource(), "station.enabled", station.id().value());
+		return ok(context.getSource(), "station.enabled", station.displayName());
 	}
 
 	private static int stationDisable(CommandContext<CommandSourceStack> context) {
@@ -281,7 +281,7 @@ public final class RailCommand {
 		}
 		railway.state().updateStation(station.withEnabled(false, railway.state().nextRevision()));
 		railway.saveState();
-		return ok(context.getSource(), "station.disabled", station.id().value());
+		return ok(context.getSource(), "station.disabled", station.displayName());
 	}
 
 	private static int stationInfo(CommandContext<CommandSourceStack> context) {
@@ -393,7 +393,7 @@ public final class RailCommand {
 		List<Binding> removed = railway.state().removeStation(station.id());
 		railway.scans().invalidate(station.id());
 		railway.saveState();
-		return ok(context.getSource(), "station.removed", station.id().value(), removed.size());
+		return ok(context.getSource(), "station.removed", station.displayName(), removed.size());
 	}
 
 	// ----------------------------------------------------------------- button
@@ -433,7 +433,7 @@ public final class RailCommand {
 		Binding binding = new Binding(RailWorld.dimension(level), button, "minecraft:stone_button", from.id(), to.id());
 		railway.state().addBinding(binding);
 		railway.saveState();
-		return ok(context.getSource(), "button.bound", from.id().value(), to.id().value());
+		return ok(context.getSource(), "button.bound", from.displayName(), to.displayName());
 	}
 
 	private static int buttonInfo(CommandContext<CommandSourceStack> context) {
@@ -459,7 +459,7 @@ public final class RailCommand {
 		String current = world.blockIdAt(button);
 		CommandSourceStack source = context.getSource();
 		source.sendSuccess(() -> Messages.text(source, "button.info", button.shortString(),
-				found.fromStationId().value(), found.toStationId().value(), current), false);
+				stationName(found.fromStationId()), stationName(found.toStationId()), current), false);
 		return 1;
 	}
 
@@ -820,6 +820,13 @@ public final class RailCommand {
 			return null;
 		}
 		return player;
+	}
+
+	private static String stationName(StationId id) {
+		if (Railway.isStarted()) {
+			return Railway.get().state().station(id).map(Station::displayName).orElse(id.value());
+		}
+		return id.value();
 	}
 
 	private static Station station(CommandSourceStack source, String rawId) {

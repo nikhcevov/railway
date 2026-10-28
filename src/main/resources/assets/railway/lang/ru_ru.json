@@ -201,5 +201,6 @@
   "error.detail.blank_sign": "табличка пустая",
   "error.detail.missing_source_name": "строка 2 должна содержать название станции отправления",
   "error.detail.blank_destination": "строка 3 должна содержать название назначения",
-  "error.station_missing": "Станция для этой кнопки больше не существует."
+  "error.station_missing": "Станция для этой кнопки больше не существует.",
+  "sign.station_restored": "Станция %s снова включена."
 }

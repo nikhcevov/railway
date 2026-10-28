@@ -201,5 +201,6 @@
   "error.detail.blank_sign": "the sign is blank",
   "error.detail.missing_source_name": "line 2 must name the source station",
   "error.detail.blank_destination": "line 3 must name the destination",
-  "error.station_missing": "The station for this button no longer exists."
+  "error.station_missing": "The station for this button no longer exists.",
+  "sign.station_restored": "Station %s re-enabled."
 }

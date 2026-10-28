@@ -917,6 +917,37 @@ public final class SignGameTests implements CustomTestMethodInvoker {
 		helper.succeed();
 	}
 
+	/**
+	 * Destroying the last sign disables a station but keeps its data. Restoring a
+	 * sign with the same station name re-enables it once it has no sign units left.
+	 */
+	@GameTest(maxTicks = 200)
+	public void restoringLastSignReenablesDisabledStation(GameTestHelper helper) {
+		Fixture fixture = buildFixture(helper);
+		BlockLocation sign = placeWallSign(helper, HOME_X, 3, Z_SIGN, Direction.NORTH);
+		BlockLocation button = placeWallButton(helper, HOME_X, 2, Z_SIGN, Direction.NORTH);
+		clearRegistration(fixture, sign, button);
+		saveSign(fixture, sign, fixture.player(), fixture.homeName(), fixture.mineName());
+		Station home = station(helper, fixture, fixture.homeName());
+		check(helper, home.enabled(), "station was not enabled after initial registration");
+
+		fixture.level().setBlock(RailWorld.pos(sign), Blocks.AIR.defaultBlockState(), 3);
+		fixture.railway().signs().verifyMarkers(fixture.server());
+		Station disabled = state(fixture).station(home.id()).orElseThrow();
+		check(helper, !disabled.enabled(), "station was not disabled after its last sign was removed");
+		check(helper, state(fixture).signUnitCount(home.id()) == 0, "sign units survived removal");
+
+		placeWallSign(helper, HOME_X, 3, Z_SIGN, Direction.NORTH);
+		saveSign(fixture, sign, fixture.player(), fixture.homeName(), fixture.mineName());
+
+		Station restored = state(fixture).station(home.id()).orElseThrow();
+		check(helper, restored.enabled(), "restoring the same sign did not re-enable the station");
+		check(helper, state(fixture).signUnitCount(home.id()) == 1, "restored sign unit missing");
+		check(helper, state(fixture).binding(fixture.dimension(), button).isPresent(),
+				"restored destination binding missing");
+		helper.succeed();
+	}
+
 	// --------------------------------------------------------------- fixtures
 
 	private record Fixture(

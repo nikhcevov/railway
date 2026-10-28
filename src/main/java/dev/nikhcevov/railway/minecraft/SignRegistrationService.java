@@ -296,6 +296,7 @@ public final class SignRegistrationService {
 		Station stationFrom;
 		Station stationTo = null;
 		boolean mainMoved = false;
+		boolean reactivated = false;
 		boolean bindingAddedOrChanged = binding != null
 				&& (existingBinding == null || !existingBinding.equals(binding));
 		try {
@@ -310,13 +311,27 @@ public final class SignRegistrationService {
 					state.updateStation(stationFrom);
 				}
 			} else {
-				stationFrom = from;
-				if (parsed.main() && (!java.util.Objects.equals(from.dock(), dock)
+				// Destroying the last sign disables the station but keeps its data. A
+				// newly restored sign with the same station name re-enables it when no
+				// other units remain; an admin-disabled station that still has signs is
+				// left disabled until explicitly enabled.
+				boolean restoreDisabled = !from.enabled()
+						&& state.signMarkersForStation(from.id()).isEmpty();
+				boolean moveMain = parsed.main() && (!java.util.Objects.equals(from.dock(), dock)
 						|| !java.util.Objects.equals(from.exit(), exit)
-						|| Float.compare(from.exitYaw(), player.getYRot()) != 0)) {
-					stationFrom = from.withMain(dock, exit, player.getYRot(), state.nextRevision());
-					state.updateStation(stationFrom);
-					mainMoved = true;
+						|| Float.compare(from.exitYaw(), player.getYRot()) != 0);
+				if (restoreDisabled || moveMain) {
+					long revision = state.nextRevision();
+					Station updated = restoreDisabled ? from.withEnabled(true, revision) : from;
+					if (moveMain) {
+						updated = updated.withMain(dock, exit, player.getYRot(), revision);
+					}
+					stationFrom = updated;
+					state.updateStation(updated);
+					reactivated = restoreDisabled;
+					mainMoved = moveMain;
+				} else {
+					stationFrom = from;
 				}
 			}
 
@@ -363,7 +378,7 @@ public final class SignRegistrationService {
 			}
 
 			sendSuccess(player, stationFrom, stationTo, stationOnly, anchorMode, mainMoved,
-					marker, existingBinding);
+					reactivated, marker, existingBinding);
 			if (anchorMode) {
 				level.sendParticles(ParticleTypes.END_ROD,
 						stationFrom.dock().x() + 0.5, stationFrom.dock().y() + 1.0,
@@ -554,9 +569,13 @@ public final class SignRegistrationService {
 			boolean stationOnly,
 			boolean anchoredNow,
 			boolean mainMoved,
+			boolean reactivated,
 			SignMarker previousMarker,
 			Binding existingBinding
 	) {
+		if (reactivated) {
+			player.sendSystemMessage(Messages.text(player, "sign.station_restored", from.displayName()));
+		}
 		if (anchoredNow) {
 			if (stationOnly) {
 				player.sendSystemMessage(Messages.text(player, "sign.station_only",
