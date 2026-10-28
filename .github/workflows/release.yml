@@ -13,7 +13,6 @@ on:
       - main
     paths:
       - 'gradle.properties'
-      - '.github/workflows/release.yml'
   workflow_dispatch:
 
 permissions:
