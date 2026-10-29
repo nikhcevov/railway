@@ -5,6 +5,8 @@
 	"mixins": [
 		"AbstractMinecartSpeedMixin",
 		"LevelMixin",
+		"NewMinecartBehaviorMixin",
+		"MinecartBehaviorAccessor",
 		"SignBlockEntityMixin"
 	],
 	"injectors": {

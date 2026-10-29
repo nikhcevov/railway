@@ -1,6 +1,6 @@
 # Railway production TODO
 
-Last updated: 2026-10-29. Current alpha: `0.1.0-alpha.5`.
+Last updated: 2026-10-29. Current alpha: `0.1.0-alpha.6`.
 
 ## Verified
 
@@ -20,7 +20,7 @@ Last updated: 2026-10-29. Current alpha: `0.1.0-alpha.5`.
 - [x] Disabled source/destination stations reject actual trips (GameTest coverage).
 - [x] `/rail route check` rejects disabled source/destination stations.
 - [x] Alpha icon, 16:9 banner, changelog, and automatic Modrinth release pipeline.
-- [x] Alpha.5 published to Modrinth and tagged `v0.1.0-alpha.5`.
+- [x] Alpha.5 published to Modrinth and tagged `v0.1.0-alpha.6`.
 - [x] Standalone server booted from downloaded Modrinth jars (alpha.1), then updated through alpha.5 local builds.
 
 ## Modrinth page — finish manually

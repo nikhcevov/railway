@@ -22,9 +22,11 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.EntitySpawnReason;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.vehicle.minecart.Minecart;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.PoweredRailBlock;
 import net.minecraft.world.level.block.RailBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.RailShape;
@@ -51,6 +53,42 @@ public final class RailwayGameTests implements CustomTestMethodInvoker {
 		startWhenFree(helper, fixture, player, fixture.homeToMine, trip);
 		assertArrival(helper, fixture, player, fixture.mineExit, trip);
 	}
+
+	@GameTest(maxTicks = 100)
+	public void poweredRailDoesNotBoostManagedCartDirectly(GameTestHelper helper) {
+		ServerLevel level = helper.getLevel();
+		BlockState powered = Blocks.POWERED_RAIL.defaultBlockState()
+				.setValue(PoweredRailBlock.SHAPE, RailShape.EAST_WEST)
+				.setValue(PoweredRailBlock.POWERED, true);
+		helper.setBlock(new BlockPos(0, 0, 0), Blocks.STONE);
+		BlockPos railPos = helper.absolutePos(new BlockPos(0, 1, 0));
+		level.setBlock(railPos, powered, 2);
+
+		Minecart cart = EntityType.MINECART.create(level, EntitySpawnReason.COMMAND);
+		if (cart == null) {
+			throw helper.assertionException("could not create test cart");
+		}
+		cart.addTag(PlayerActions.MANAGED_TAG);
+		cart.setPos(railPos.getX() + 0.5, railPos.getY(), railPos.getZ() + 0.5);
+		cart.setDeltaMovement(0.2, 0.0, 0.0);
+		if (!level.addFreshEntity(cart)) {
+			throw helper.assertionException("could not add test cart");
+		}
+
+		int[] ticks = {0};
+		helper.onEachTick(() -> {
+			if (++ticks[0] < 2) {
+				return;
+			}
+			double speed = cart.getDeltaMovement().horizontalDistance();
+			if (speed > 0.22) {
+				throw helper.assertionException("managed cart was boosted by powered rail: " + speed);
+			}
+			cart.discard();
+			helper.succeed();
+		});
+	}
+
 
 	@GameTest(maxTicks = 200)
 	public void disabledStationsRejectTripsWithNames(GameTestHelper helper) {

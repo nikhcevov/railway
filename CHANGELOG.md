@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.0-alpha.6 — 2026-10-29
+
+- Powered rails are treated as ordinary track for Railway-managed service carts.
+  Vanilla powered-rail acceleration and unpowered-rail slowdown are suppressed,
+  preventing arrival overshoot and internal aborts without player-side rules.
+- Normal, non-managed minecarts keep vanilla powered-rail behavior.
+- Added a GameTest proving a managed cart is not accelerated by a powered rail.
+
 ## 0.1.0-alpha.5 — 2026-10-29
 
 - `/rail route check` now rejects disabled source or destination stations with
