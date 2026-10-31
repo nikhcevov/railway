@@ -161,6 +161,10 @@ Every station has one main dock/exit. Arrival always uses it.
 - Breaking the main sign does not delete the stored main dock/exit; other units
   continue and main data remains. Disabling is governed by the anchor-sign rule
   above.
+- When the last unit is gone, the station is disabled but keeps its data. A sign
+  that restores the station then becomes main without needing `m`, because no
+  other unit remains to define the arrival point. Restoring at a new dock moves
+  main there instead of keeping the old, possibly demolished dock/exit.
 - A main destination unit still departs from its own local dock.
 
 `m` is checked when the sign is saved. Moving main triggers a station rescan from

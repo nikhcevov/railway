@@ -1,11 +1,11 @@
 # Railway production TODO
 
-Last updated: 2026-10-29. Current alpha: `0.1.0-alpha.6`.
+Last updated: 2026-11-01. Current alpha: `0.1.0-alpha.7`.
 
 ## Verified
 
 - [x] Unit tests: 245 passing.
-- [x] GameTests: 62 passing.
+- [x] GameTests: 64 passing.
 - [x] Automatic startup scans, one scan per connected component.
 - [x] Scan frontier wider than 32 chunks is processed in bounded subsets.
 - [x] Long-route fixture: 513 rails, 512-block route both directions, destination unloaded before scan, scan auto-loads it, no recovery debris.
@@ -20,7 +20,7 @@ Last updated: 2026-10-29. Current alpha: `0.1.0-alpha.6`.
 - [x] Disabled source/destination stations reject actual trips (GameTest coverage).
 - [x] `/rail route check` rejects disabled source/destination stations.
 - [x] Alpha icon, 16:9 banner, changelog, and automatic Modrinth release pipeline.
-- [x] Alpha.5 published to Modrinth and tagged `v0.1.0-alpha.6`.
+- [x] Alpha.6 published to Modrinth and tagged `v0.1.0-alpha.6`.
 - [x] Standalone server booted from downloaded Modrinth jars (alpha.1), then updated through alpha.5 local builds.
 
 ## Modrinth page — finish manually

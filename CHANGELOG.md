@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.0-alpha.7 — 2026-11-01
+
+- Restoring a disabled station with a sign at a different dock now moves the
+  station main arrival point to the restored sign when no sign units remain.
+  Previously the station re-enabled but kept arriving at the old, possibly
+  destroyed main dock/exit.
+
 ## 0.1.0-alpha.6 — 2026-10-29
 
 - Powered rails are treated as ordinary track for Railway-managed service carts.

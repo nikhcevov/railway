@@ -948,6 +948,50 @@ public final class SignGameTests implements CustomTestMethodInvoker {
 		helper.succeed();
 	}
 
+	/**
+	 * Destroying the last sign disables a station but keeps its data. Restoring a
+	 * sign at a different dock when no units remain must also move the main arrival
+	 * point; otherwise trips keep arriving at the old, possibly demolished, dock.
+	 */
+	@GameTest(maxTicks = 200)
+	public void restoringLastSignAtNewDockMovesMainArrival(GameTestHelper helper) {
+		Fixture fixture = buildFixture(helper);
+		BlockLocation oldSign = placeWallSign(helper, HOME_X, 3, Z_SIGN, Direction.NORTH);
+		BlockLocation oldButton = placeWallButton(helper, HOME_X, 2, Z_SIGN, Direction.NORTH);
+		clearRegistration(fixture, oldSign, oldButton);
+		saveSign(fixture, oldSign, fixture.player(), fixture.homeName(), fixture.mineName());
+		Station home = station(helper, fixture, fixture.homeName());
+		BlockLocation oldDock = home.dock();
+
+		breakBlockThroughService(fixture, oldSign);
+		Station disabled = state(fixture).station(home.id()).orElseThrow();
+		check(helper, !disabled.enabled(), "station was not disabled after its last sign was removed");
+
+		buildPillar(helper, 5, DEST_SUPPORT_Z);
+		buildExitPlatform(helper, 5, Z_EXIT);
+		BlockLocation newDock = absolute(helper, 5, DOCK_Y, Z_RAIL);
+		BlockLocation newExit = absolute(helper, 5, DOCK_Y, Z_EXIT);
+		BlockLocation newSign = placeWallSign(helper, 5, 3, Z_SIGN, Direction.NORTH);
+		BlockLocation newButton = placeWallButton(helper, 5, 2, Z_SIGN, Direction.NORTH);
+		ServerPlayer mover = opPlayer(helper, fixture, newExit);
+		saveSign(fixture, newSign, mover, fixture.homeName(), fixture.mineName());
+
+		Station restored = state(fixture).station(home.id()).orElseThrow();
+		check(helper, restored.enabled(), "restored station was not re-enabled");
+		check(helper, newDock.equals(restored.dock()),
+				"restored station kept the old main dock: " + restored.dock());
+		check(helper, newExit.equals(restored.exit()),
+				"restored station kept the old main exit: " + restored.exit());
+		check(helper, !oldDock.equals(restored.dock()), "restored main dock did not move");
+		SignMarker mainMarker = state(fixture).mainMarkerForStation(home.id()).orElse(null);
+		check(helper, mainMarker != null && mainMarker.sign().equals(newSign),
+				"restored sign did not become the main marker");
+		Binding binding = state(fixture).binding(fixture.dimension(), newButton).orElse(null);
+		check(helper, binding != null && newDock.equals(binding.sourceDock()),
+				"restored destination binding does not depart from the new dock");
+		helper.succeed();
+	}
+
 	// --------------------------------------------------------------- fixtures
 
 	private record Fixture(

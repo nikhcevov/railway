@@ -285,8 +285,13 @@ public final class SignRegistrationService {
 			}
 		}
 
+		// A station disabled by destroying its last sign has no units left. The
+		// restoring sign then defines the station again, including its arrival point.
+		boolean restoreDisabled = !anchorMode && !from.enabled()
+				&& state.signMarkersForStation(from.id()).isEmpty();
+
 		BlockLocation exit = null;
-		if (anchorMode || parsed.main()) {
+		if (anchorMode || parsed.main() || restoreDisabled) {
 			exit = selectExit(level, railWorld, player, dock);
 			if (exit == null) {
 				return reject(player, sign, front, previous, marker, Failure.at(FailureCode.EXIT_UNSAFE, dock));
@@ -314,10 +319,10 @@ public final class SignRegistrationService {
 				// Destroying the last sign disables the station but keeps its data. A
 				// newly restored sign with the same station name re-enables it when no
 				// other units remain; an admin-disabled station that still has signs is
-				// left disabled until explicitly enabled.
-				boolean restoreDisabled = !from.enabled()
-						&& state.signMarkersForStation(from.id()).isEmpty();
-				boolean moveMain = parsed.main() && (!java.util.Objects.equals(from.dock(), dock)
+				// left disabled until explicitly enabled. With no units left, the
+				// restoring sign also becomes the station's arrival point.
+				boolean moveMain = (parsed.main() || restoreDisabled)
+						&& (!java.util.Objects.equals(from.dock(), dock)
 						|| !java.util.Objects.equals(from.exit(), exit)
 						|| Float.compare(from.exitYaw(), player.getYRot()) != 0);
 				if (restoreDisabled || moveMain) {
@@ -358,8 +363,9 @@ public final class SignRegistrationService {
 					? stationFrom.id()
 					: marker == null ? null : marker.anchorStationId();
 			StationId stationId = anchorMode ? stationFrom.id() : from.id();
+			boolean mainFlag = parsed.main() || restoreDisabled;
 			SignMarker desiredMarker = new SignMarker(dimension, signLocation, support, front, button,
-					anchorStationId, stationId, parsed.main());
+					anchorStationId, stationId, mainFlag);
 			state.updateSignMarker(desiredMarker);
 			railway.saveState();
 
