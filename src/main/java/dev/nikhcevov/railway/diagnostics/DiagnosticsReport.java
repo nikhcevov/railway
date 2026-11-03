@@ -352,20 +352,10 @@ public record DiagnosticsReport(
 		if (scan.coveredBy() != null) {
 			text += Messages.format(lang, "diagnostics.scan.covered_by", scan.coveredBy().value());
 		} else if (!scan.covered().isEmpty()) {
-			text += Messages.format(lang, "diagnostics.scan.covers", stationList(scan.covered()));
+			text += Messages.format(lang, "diagnostics.scan.covers",
+					Messages.joinStationIds(scan.covered()));
 		}
 		return text;
-	}
-
-	private static String stationList(List<StationId> stations) {
-		StringBuilder builder = new StringBuilder();
-		for (StationId station : stations) {
-			if (!builder.isEmpty()) {
-				builder.append(", ");
-			}
-			builder.append(station.value());
-		}
-		return builder.toString();
 	}
 
 	private static void add(List<String> lines, Messages.Lang lang, String key, Object... args) {

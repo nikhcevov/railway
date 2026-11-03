@@ -22,11 +22,6 @@ import java.util.Set;
  * from the chosen edges and conflicting repeat visits are rejected.
  */
 public final class RailGraphPlanner {
-	private static final Comparator<BlockLocation> POSITION_ORDER =
-			Comparator.comparingInt(BlockLocation::x)
-					.thenComparingInt(BlockLocation::y)
-					.thenComparingInt(BlockLocation::z);
-
 	private record Node(RailState state, double cost) {
 	}
 
@@ -65,7 +60,7 @@ public final class RailGraphPlanner {
 		}
 
 		Comparator<Node> order = Comparator.comparingDouble(Node::cost)
-				.thenComparing(node -> node.state().pos(), POSITION_ORDER)
+				.thenComparing(node -> node.state().pos(), BlockLocation.POSITION_ORDER)
 				.thenComparingInt(node -> node.state().entryPort().ordinal());
 		PriorityQueue<Node> queue = new PriorityQueue<>(order);
 		Map<RailState, Double> distances = new HashMap<>();

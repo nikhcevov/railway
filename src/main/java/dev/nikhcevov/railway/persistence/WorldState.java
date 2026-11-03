@@ -54,22 +54,8 @@ public final class WorldState {
 		return StationNames.find(stations.values(), dimension, name);
 	}
 
-	/** The single station with this name, or empty when absent or ambiguous. */
-	public Optional<Station> uniqueStationNamed(String dimension, String name) {
-		return StationNames.unique(stations.values(), dimension, name);
-	}
-
 	public boolean hasStationNamed(String dimension, String name) {
 		return !stationsNamed(dimension, name).isEmpty();
-	}
-
-	public boolean isStationNameAmbiguous(String dimension, String name) {
-		return StationNames.isAmbiguous(stations.values(), dimension, name);
-	}
-
-	/** Display spelling of the first station registered under this name. */
-	public Optional<String> displayNameFor(String dimension, String name) {
-		return StationNames.displaySpelling(stations.values(), dimension, name);
 	}
 
 	public void addStation(Station station) {

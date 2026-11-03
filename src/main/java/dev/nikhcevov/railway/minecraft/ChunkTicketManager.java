@@ -4,7 +4,6 @@ import dev.nikhcevov.railway.dispatch.ChunkWindow;
 import dev.nikhcevov.railway.domain.BlockLocation;
 import dev.nikhcevov.railway.domain.TripId;
 
-import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ChunkLevel;
 import net.minecraft.server.level.FullChunkStatus;
 import net.minecraft.server.level.ServerLevel;
@@ -617,10 +616,7 @@ public final class ChunkTicketManager {
 		if (state != null) {
 			state.readinessChecks++;
 		}
-		BlockPos pos = RailWorld.pos(location);
-		return level.isLoaded(pos)
-				&& level.isPositionEntityTicking(pos)
-				&& level.areEntitiesActuallyLoadedAndTicking(ChunkPos.containing(pos));
+		return RailWorld.isPositionReady(level, location);
 	}
 
 	public static boolean isChunkReady(ServerLevel level, ChunkWindow.Key key) {

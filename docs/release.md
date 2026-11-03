@@ -123,8 +123,7 @@ MODRINTH_TOKEN=... MODRINTH_PROJECT_ID=... python3 scripts/update-modrinth-chang
 ```
 
 The script dry-runs by default. The token needs `VERSION_WRITE` in addition to
-`CREATE_VERSION`. The `fix-modrinth-changelogs` workflow performs the same repair
-using the repository secret and variable.
+`CREATE_VERSION`.
 
 `workflow_dispatch` is available for retries. Do not create the release tag
 manually unless recovery requires it.

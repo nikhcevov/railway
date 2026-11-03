@@ -18,11 +18,6 @@ import java.util.Set;
  * Keys are runtime-only, deterministic and direction-independent.
  */
 public final class RouteResourcePlanner {
-	private static final Comparator<BlockLocation> POSITION_ORDER =
-			Comparator.comparingInt(BlockLocation::x)
-					.thenComparingInt(BlockLocation::y)
-					.thenComparingInt(BlockLocation::z);
-
 	private RouteResourcePlanner() {
 	}
 
@@ -74,14 +69,14 @@ public final class RouteResourcePlanner {
 			if (interior.isEmpty()) {
 				continue;
 			}
-			interior.sort(POSITION_ORDER);
+			interior.sort(BlockLocation.POSITION_ORDER);
 			int hash = 1;
 			for (BlockLocation pos : interior) {
 				hash = 31 * hash + pos.hashCode();
 			}
 			BlockLocation a = plan.steps().get(start).pos();
 			BlockLocation z = plan.steps().get(end).pos();
-			if (POSITION_ORDER.compare(z, a) < 0) {
+			if (BlockLocation.POSITION_ORDER.compare(z, a) < 0) {
 				BlockLocation swap = a;
 				a = z;
 				z = swap;

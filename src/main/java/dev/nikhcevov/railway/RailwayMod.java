@@ -6,7 +6,6 @@ import dev.nikhcevov.railway.domain.Binding;
 import dev.nikhcevov.railway.fixture.FixtureCommand;
 import dev.nikhcevov.railway.fixture.FixtureEnvironment;
 import dev.nikhcevov.railway.fixture.FixtureService;
-import dev.nikhcevov.railway.minecraft.PlayerActions;
 import dev.nikhcevov.railway.minecraft.RailWorld;
 import dev.nikhcevov.railway.minecraft.Railway;
 import dev.nikhcevov.railway.minecraft.TripService;
@@ -27,16 +26,12 @@ import net.minecraft.world.InteractionResult;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.BlockHitResult;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
 
 public final class RailwayMod implements ModInitializer {
 	public static final String MOD_ID = "railway";
-	public static final Logger LOGGER = LoggerFactory.getLogger(MOD_ID);
 
 	private static final Map<UUID, Integer> LAST_PRESS_TICK = new HashMap<>();
 	/** Marker verification cadence; low frequency keeps the check off the hot path. */

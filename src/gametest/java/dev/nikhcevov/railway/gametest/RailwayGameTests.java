@@ -13,7 +13,6 @@ import dev.nikhcevov.railway.minecraft.ScanService;
 import dev.nikhcevov.railway.minecraft.TripService;
 import dev.nikhcevov.railway.network.RailGraph;
 
-import net.fabricmc.fabric.api.gametest.v1.CustomTestMethodInvoker;
 import net.fabricmc.fabric.api.gametest.v1.GameTest;
 
 import net.minecraft.core.BlockPos;
@@ -21,7 +20,6 @@ import net.minecraft.gametest.framework.GameTestHelper;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntitySpawnReason;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.vehicle.minecart.Minecart;
@@ -30,9 +28,7 @@ import net.minecraft.world.level.block.PoweredRailBlock;
 import net.minecraft.world.level.block.RailBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.RailShape;
-import net.minecraft.world.level.entity.EntityTypeTest;
 
-import java.lang.reflect.Method;
 import java.util.List;
 import java.util.Set;
 
@@ -40,7 +36,7 @@ import java.util.Set;
  * End-to-end server game tests. Each test builds its own straight line inside the
  * empty 8x8 test plot, registers stations and launches a real server player.
  */
-public final class RailwayGameTests implements CustomTestMethodInvoker {
+public final class RailwayGameTests extends GameTestSupport {
 	private static final int LINE_END = 7;
 	private static final int HOME_DOCK = 1;
 	private static final int MINE_DOCK = 6;
@@ -653,7 +649,7 @@ public final class RailwayGameTests implements CustomTestMethodInvoker {
 		Railway railway = Railway.get();
 		ServerLevel level = helper.getLevel();
 		MinecraftServer server = level.getServer();
-		buildLine(helper);
+		buildLine(helper, LINE_END, 0, HOME_DOCK, MINE_DOCK);
 
 		String unique = Long.toString(System.nanoTime() & 0xFFFFFFL, 36) + suffix;
 		StationId homeId = new StationId("gthome" + unique);
@@ -779,43 +775,11 @@ public final class RailwayGameTests implements CustomTestMethodInvoker {
 		});
 	}
 
-	private static boolean tripActive(Railway railway, TripId trip) {
-		for (var active : railway.trips().activeTrips()) {
-			if (active.id().equals(trip)) {
-				return true;
-			}
-		}
-		return false;
-	}
-
 	private static void requireTripFinished(GameTestHelper helper, Railway railway, TripId trip) {
 		for (var active : railway.trips().activeTrips()) {
 			if (active.id().equals(trip)) {
 				throw helper.assertionException("trip still active: " + active.phase());
 			}
-		}
-	}
-
-	private static void requireNoManagedCart(GameTestHelper helper, ServerLevel level) {
-		EntityTypeTest<Entity, Minecart> carts = EntityTypeTest.forClass(Minecart.class);
-		if (!level.getEntities(carts, helper.absoluteAABB(helper.getBounds().inflate(2.0)),
-				cart -> cart.entityTags().contains(PlayerActions.MANAGED_TAG)).isEmpty()) {
-			throw helper.assertionException("service cart was not removed");
-		}
-	}
-
-	private static void scan(GameTestHelper helper, ScanService scans, Station station, ServerLevel level,
-			MinecraftServer server) {
-		ScanService.StartResult result = scans.start(station, level, Railway.get().config(), server.getTickCount(),
-				Railway.get().state().revision());
-		if (!(result instanceof ScanService.StartResult.Started)) {
-			helper.fail("scan did not start: " + result);
-		}
-		for (int i = 0; i < 32 && scans.isRunning(station.id()); i++) {
-			scans.tick(server);
-		}
-		if (scans.graph(station.id()) == null) {
-			helper.fail("scan failed for " + station.id() + ": " + scans.failure(station.id()));
 		}
 	}
 
@@ -840,28 +804,4 @@ public final class RailwayGameTests implements CustomTestMethodInvoker {
 		return station;
 	}
 
-	private static void buildLine(GameTestHelper helper) {
-		for (int x = 0; x <= LINE_END; x++) {
-			helper.setBlock(new BlockPos(x, 0, 0), Blocks.STONE);
-			helper.setBlock(new BlockPos(x, 1, 0), Blocks.AIR);
-		}
-		BlockState rail = Blocks.RAIL.defaultBlockState().setValue(RailBlock.SHAPE, RailShape.EAST_WEST);
-		for (int x = 0; x <= LINE_END; x++) {
-			helper.getLevel().setBlock(helper.absolutePos(new BlockPos(x, 1, 0)), rail, 2);
-		}
-		for (int x : new int[]{HOME_DOCK, MINE_DOCK}) {
-			helper.setBlock(new BlockPos(x, 0, 2), Blocks.STONE);
-			helper.setBlock(new BlockPos(x, 1, 2), Blocks.AIR);
-			helper.setBlock(new BlockPos(x, 2, 2), Blocks.AIR);
-		}
-	}
-
-	private static BlockLocation absolute(GameTestHelper helper, int x, int y, int z) {
-		return RailWorld.loc(helper.absolutePos(new BlockPos(x, y, z)));
-	}
-
-	@Override
-	public void invokeTestMethod(GameTestHelper context, Method method) throws ReflectiveOperationException {
-		method.invoke(this, context);
-	}
 }

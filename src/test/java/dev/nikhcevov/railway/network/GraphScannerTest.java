@@ -1,7 +1,6 @@
 package dev.nikhcevov.railway.network;
 
 import dev.nikhcevov.railway.domain.BlockLocation;
-import dev.nikhcevov.railway.domain.Failure;
 import dev.nikhcevov.railway.domain.FailureCode;
 import dev.nikhcevov.railway.domain.StationId;
 

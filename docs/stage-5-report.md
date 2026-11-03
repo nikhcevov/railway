@@ -3,6 +3,10 @@
 Date: 2026-10-27. Status: implemented on top of Stage 4.1 and validated on the dev
 server with the production server-mod set. No production deployment.
 
+> **Historical snapshot.** Test counts and limitations below describe this stage,
+> not the current tree. Current acceptance gates and verification live in
+> [`TODO.md`](../TODO.md).
+
 ## Delivered
 
 | Area | Behavior |

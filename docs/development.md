@@ -164,7 +164,7 @@ deleted before a release. See [`fixtures.md`](fixtures.md).
 
 ## Known limitations
 
-See [`stage-5-report.md`](stage-5-report.md) and
+See the historical [`stage-5-report.md`](stage-5-report.md) and
 [`operations.md`](operations.md). Notably:
 
 - the dev-only `long-route-unloaded` fixture and `kill -9` harness now exist,

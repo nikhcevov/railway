@@ -11,10 +11,8 @@ import dev.nikhcevov.railway.domain.StationId;
 import dev.nikhcevov.railway.domain.TripId;
 import dev.nikhcevov.railway.minecraft.RailWorld;
 import dev.nikhcevov.railway.minecraft.Railway;
-import dev.nikhcevov.railway.minecraft.ScanService;
 import dev.nikhcevov.railway.minecraft.TripService;
 
-import net.fabricmc.fabric.api.gametest.v1.CustomTestMethodInvoker;
 import net.fabricmc.fabric.api.gametest.v1.GameTest;
 
 import net.minecraft.commands.CommandSource;
@@ -26,17 +24,13 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.block.Blocks;
-import net.minecraft.world.level.block.RailBlock;
-import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.level.block.state.properties.RailShape;
 
-import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 
 /** Diagnostics stay read-only and expose station, trip, ticket and recovery state. */
-public final class DiagnosticsGameTests implements CustomTestMethodInvoker {
+public final class DiagnosticsGameTests extends GameTestSupport {
 	private static final int LINE_END = 5;
 	private static final int FROM_DOCK = 1;
 	private static final int TO_DOCK = 4;
@@ -143,7 +137,7 @@ public final class DiagnosticsGameTests implements CustomTestMethodInvoker {
 		Railway railway = Railway.get();
 		ServerLevel level = helper.getLevel();
 		MinecraftServer server = level.getServer();
-		buildLine(helper);
+		buildLine(helper, LINE_END, 0, FROM_DOCK, TO_DOCK);
 
 		String unique = unique();
 		String dimension = RailWorld.dimension(level);
@@ -164,8 +158,8 @@ public final class DiagnosticsGameTests implements CustomTestMethodInvoker {
 		level.setBlock(RailWorld.pos(button), Blocks.STONE_BUTTON.defaultBlockState(), 2);
 		Binding binding = new Binding(dimension, button, "minecraft:stone_button", fromId, toId);
 		railway.state().addBinding(binding);
-		scan(helper, from, level, server);
-		scan(helper, to, level, server);
+		scan(helper, Railway.get().scans(), from, level, server);
+		scan(helper, Railway.get().scans(), to, level, server);
 
 		ServerPlayer player = helper.makeMockServerPlayerInLevel();
 		player.teleportTo(fromExit.x() + 0.5, fromExit.y(), fromExit.z() + 0.5);
@@ -229,48 +223,4 @@ public final class DiagnosticsGameTests implements CustomTestMethodInvoker {
 		}
 	}
 
-	private static String unique() {
-		return Long.toString(System.nanoTime() & 0xFFFFFFL, 36);
-	}
-
-	private static void buildLine(GameTestHelper helper) {
-		for (int x = 0; x <= LINE_END; x++) {
-			helper.setBlock(new BlockPos(x, 0, 0), Blocks.STONE);
-			helper.setBlock(new BlockPos(x, 1, 0), Blocks.AIR);
-		}
-		BlockState rail = Blocks.RAIL.defaultBlockState().setValue(RailBlock.SHAPE, RailShape.EAST_WEST);
-		for (int x = 0; x <= LINE_END; x++) {
-			helper.getLevel().setBlock(helper.absolutePos(new BlockPos(x, 1, 0)), rail, 2);
-		}
-		for (int x : new int[]{FROM_DOCK, TO_DOCK}) {
-			helper.setBlock(new BlockPos(x, 0, 2), Blocks.STONE);
-			helper.setBlock(new BlockPos(x, 1, 2), Blocks.AIR);
-			helper.setBlock(new BlockPos(x, 2, 2), Blocks.AIR);
-		}
-	}
-
-	private static BlockLocation absolute(GameTestHelper helper, int x, int y, int z) {
-		return RailWorld.loc(helper.absolutePos(new BlockPos(x, y, z)));
-	}
-
-	private static void scan(GameTestHelper helper, Station station, ServerLevel level,
-			MinecraftServer server) {
-		ScanService scans = Railway.get().scans();
-		ScanService.StartResult result = scans.start(station, level, Railway.get().config(),
-				server.getTickCount(), Railway.get().state().revision());
-		if (!(result instanceof ScanService.StartResult.Started)) {
-			helper.fail("scan did not start for " + station.id() + ": " + result);
-		}
-		for (int i = 0; i < 32 && scans.isRunning(station.id()); i++) {
-			scans.tick(server);
-		}
-		if (scans.graph(station.id()) == null) {
-			helper.fail("scan failed for " + station.id() + ": " + scans.failure(station.id()));
-		}
-	}
-
-	@Override
-	public void invokeTestMethod(GameTestHelper context, Method method) throws ReflectiveOperationException {
-		method.invoke(this, context);
-	}
 }

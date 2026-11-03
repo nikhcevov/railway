@@ -62,10 +62,6 @@ public enum RailShapeType {
 		return this == ASCENDING_EAST || this == ASCENDING_WEST || this == ASCENDING_NORTH || this == ASCENDING_SOUTH;
 	}
 
-	public boolean isCurve() {
-		return !isStraight();
-	}
-
 	public boolean isStraight() {
 		return switch (this) {
 			case NORTH_SOUTH, EAST_WEST, ASCENDING_EAST, ASCENDING_WEST, ASCENDING_NORTH, ASCENDING_SOUTH -> true;

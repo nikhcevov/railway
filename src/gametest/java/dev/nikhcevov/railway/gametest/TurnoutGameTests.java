@@ -6,14 +6,12 @@ import dev.nikhcevov.railway.domain.FailureCode;
 import dev.nikhcevov.railway.domain.Station;
 import dev.nikhcevov.railway.domain.StationId;
 import dev.nikhcevov.railway.domain.TripId;
-import dev.nikhcevov.railway.minecraft.PlayerActions;
 import dev.nikhcevov.railway.minecraft.RailWorld;
 import dev.nikhcevov.railway.minecraft.Railway;
 import dev.nikhcevov.railway.minecraft.ScanService;
 import dev.nikhcevov.railway.minecraft.TripService;
 import dev.nikhcevov.railway.network.RailShapeType;
 
-import net.fabricmc.fabric.api.gametest.v1.CustomTestMethodInvoker;
 import net.fabricmc.fabric.api.gametest.v1.GameTest;
 
 import net.minecraft.core.BlockPos;
@@ -21,14 +19,9 @@ import net.minecraft.gametest.framework.GameTestHelper;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.world.entity.Entity;
-import net.minecraft.world.entity.EntityType;
-import net.minecraft.world.entity.vehicle.minecart.Minecart;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.RailBlock;
-import net.minecraft.world.level.entity.EntityTypeTest;
 
-import java.lang.reflect.Method;
 import java.util.List;
 import java.util.Set;
 
@@ -36,7 +29,7 @@ import java.util.Set;
  * Stage-2 end-to-end tests: a three-station T network, a curve+slope trip and
  * an external turnout change while a cart is approaching.
  */
-public final class TurnoutGameTests implements CustomTestMethodInvoker {
+public final class TurnoutGameTests extends GameTestSupport {
 	private static final String BUTTON_ID = "minecraft:stone_button";
 
 	@GameTest(maxTicks = 3000)
@@ -355,21 +348,6 @@ public final class TurnoutGameTests implements CustomTestMethodInvoker {
 		return new CurveNetwork(railway, level, home, south, home.exit(), south.exit(), button);
 	}
 
-	private static void scan(GameTestHelper helper, ScanService scans, Station station, ServerLevel level,
-			MinecraftServer server) {
-		ScanService.StartResult result = scans.start(station, level, Railway.get().config(), server.getTickCount(),
-				Railway.get().state().revision());
-		if (!(result instanceof ScanService.StartResult.Started)) {
-			helper.fail("scan did not start: " + result);
-		}
-		for (int i = 0; i < 64 && scans.isRunning(station.id()); i++) {
-			scans.tick(server);
-		}
-		if (scans.graph(station.id()) == null) {
-			helper.fail("scan failed for " + station.id() + ": " + scans.failure(station.id()));
-		}
-	}
-
 	private static void rail(GameTestHelper helper, int x, int y, int z, RailShapeType shape) {
 		BlockPos pos = helper.absolutePos(new BlockPos(x, y, z));
 		helper.getLevel().setBlock(pos, Blocks.RAIL.defaultBlockState()
@@ -386,33 +364,4 @@ public final class TurnoutGameTests implements CustomTestMethodInvoker {
 		helper.setBlock(new BlockPos(x, y + 1, z), Blocks.AIR);
 	}
 
-	private static BlockLocation absolute(GameTestHelper helper, int x, int y, int z) {
-		return RailWorld.loc(helper.absolutePos(new BlockPos(x, y, z)));
-	}
-
-	private static boolean tripActive(Railway railway, TripId trip) {
-		for (var active : railway.trips().activeTrips()) {
-			if (active.id().equals(trip)) {
-				return true;
-			}
-		}
-		return false;
-	}
-
-	private static void requireNoManagedCart(GameTestHelper helper, ServerLevel level) {
-		EntityTypeTest<Entity, Minecart> carts = EntityTypeTest.forClass(Minecart.class);
-		if (!level.getEntities(carts, helper.absoluteAABB(helper.getBounds().inflate(2.0)),
-				cart -> cart.entityTags().contains(PlayerActions.MANAGED_TAG)).isEmpty()) {
-			throw helper.assertionException("service cart was not removed");
-		}
-	}
-
-	private static String unique() {
-		return Long.toString(System.nanoTime() & 0xFFFFFFL, 36);
-	}
-
-	@Override
-	public void invokeTestMethod(GameTestHelper context, Method method) throws ReflectiveOperationException {
-		method.invoke(this, context);
-	}
 }

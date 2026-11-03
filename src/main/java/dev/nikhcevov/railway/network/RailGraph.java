@@ -34,13 +34,8 @@ public final class RailGraph {
 		}
 	}
 
-	private static final Comparator<BlockLocation> POSITION_ORDER =
-			Comparator.comparingInt(BlockLocation::x)
-					.thenComparingInt(BlockLocation::y)
-					.thenComparingInt(BlockLocation::z);
-
 	private static final Comparator<RailState> STATE_ORDER =
-			Comparator.comparing(RailState::pos, POSITION_ORDER)
+			Comparator.comparing(RailState::pos, BlockLocation.POSITION_ORDER)
 					.thenComparingInt(state -> state.entryPort().ordinal());
 
 	private final String dimension;
@@ -63,7 +58,7 @@ public final class RailGraph {
 		if (input.isEmpty()) {
 			throw new GraphBuildException(Failure.detail(FailureCode.INTERNAL, "empty graph"));
 		}
-		Map<BlockLocation, GraphRail> rails = new TreeMap<>(POSITION_ORDER);
+		Map<BlockLocation, GraphRail> rails = new TreeMap<>(BlockLocation.POSITION_ORDER);
 		for (GraphRail rail : input) {
 			if (rails.putIfAbsent(rail.pos(), rail) != null) {
 				throw new GraphBuildException(Failure.at(FailureCode.INTERNAL, rail.pos(), "duplicate rail"));

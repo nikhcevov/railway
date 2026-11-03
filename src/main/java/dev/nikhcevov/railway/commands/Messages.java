@@ -4,6 +4,7 @@ import com.google.gson.Gson;
 import com.google.gson.reflect.TypeToken;
 
 import dev.nikhcevov.railway.domain.Failure;
+import dev.nikhcevov.railway.domain.StationId;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
@@ -13,6 +14,7 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.Reader;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.regex.Pattern;
@@ -140,6 +142,18 @@ public final class Messages {
 			return detail.toLowerCase(Locale.ROOT).replace('_', ' ');
 		}
 		return detail;
+	}
+
+	/** Joins station ids for chat output, preserving the given order. */
+	public static String joinStationIds(List<StationId> stations) {
+		StringBuilder builder = new StringBuilder();
+		for (StationId station : stations) {
+			if (!builder.isEmpty()) {
+				builder.append(", ");
+			}
+			builder.append(station.value());
+		}
+		return builder.toString();
 	}
 
 	public static void actionBar(ServerPlayer player, String key, Object... args) {

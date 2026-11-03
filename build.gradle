@@ -150,14 +150,6 @@ def changelogForVersion = { String version ->
 	return body.isEmpty() ? "Railway ${version}" : body
 }
 
-def printChangelogVersion = project.version.toString()
-def printChangelogText = changelogForVersion(printChangelogVersion)
-tasks.register('printModrinthChangelog') {
-	doLast {
-		println printChangelogText
-	}
-}
-
 // Modrinth publishing. `./gradlew modrinth` uploads the remapped release jar.
 // Requires MODRINTH_TOKEN and MODRINTH_PROJECT_ID. The release workflow supplies
 // both; local builds do not need them.

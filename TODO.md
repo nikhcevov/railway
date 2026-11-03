@@ -29,7 +29,7 @@ Last updated: 2026-11-01. Current alpha: `0.1.0-alpha.7`.
 - [ ] Confirm `docs/assets/railway-alpha-banner.png` is in the gallery.
 - [ ] Paste or sync `docs/modrinth-description.md` as the project body.
 - [ ] Confirm the live version is type `alpha`, loader `fabric`, environment `server_only`, game `26.1.2`.
-- [ ] Download the published alpha.5 jar and start it on a fresh copy server.
+- [ ] Download the published alpha.7 jar and start it on a fresh copy server.
 - [ ] Check the gallery screenshots/video.
 
 ## Remaining P0 checks
@@ -38,7 +38,7 @@ Last updated: 2026-11-01. Current alpha: `0.1.0-alpha.7`.
 - [ ] **Concurrent trips and turnouts:** several players at once, shared junction conflicts, abort, disconnect, and reconnect; no duplicate carts or stuck reservations.
 - [ ] **Backup/corrupt-state drill:** corrupt `state.json`, stale schema, missing backup, invalid config, failed save/disk conditions.
 - [ ] **Final removal:** remove Railway from a copied world and load it with vanilla; no orphan entities or required custom blocks.
-- [ ] **Copied real-world test:** install alpha.5 on a copy of the production world, build one low-risk two-station route, and run passenger/return/restart cycles.
+- [ ] **Copied real-world test:** install alpha.7 on a copy of the production world, build one low-risk two-station route, and run passenger/return/restart cycles.
 - [ ] **Soak test:** leave the copied-world server running for 24 hours with several trips; watch TPS, logs, tickets, and diagnostics.
 
 ## Before beta/stable

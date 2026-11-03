@@ -37,7 +37,6 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
-import java.util.UUID;
 import java.util.function.Predicate;
 
 /** Public {@code /rail} command surface for stage 1. */
@@ -567,20 +566,9 @@ public final class RailCommand {
 		if (status.coveredBy() != null) {
 			text += Messages.format(lang, "scan.status.covered", status.coveredBy().value());
 		} else if (!status.covered().isEmpty()) {
-			text += Messages.format(lang, "scan.status.covers", stationList(status.covered()));
+			text += Messages.format(lang, "scan.status.covers", Messages.joinStationIds(status.covered()));
 		}
 		return text;
-	}
-
-	private static String stationList(List<StationId> stations) {
-		StringBuilder builder = new StringBuilder();
-		for (StationId station : stations) {
-			if (!builder.isEmpty()) {
-				builder.append(", ");
-			}
-			builder.append(station.value());
-		}
-		return builder.toString();
 	}
 
 	/** A scan timeout is not a trip stop, so keep its wording scan-specific. */

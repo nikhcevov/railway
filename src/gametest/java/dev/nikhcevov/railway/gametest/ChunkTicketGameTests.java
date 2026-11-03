@@ -16,7 +16,6 @@ import dev.nikhcevov.railway.network.RailPort;
 import dev.nikhcevov.railway.network.RailShapeType;
 import dev.nikhcevov.railway.network.RouteStep;
 
-import net.fabricmc.fabric.api.gametest.v1.CustomTestMethodInvoker;
 import net.fabricmc.fabric.api.gametest.v1.GameTest;
 
 import net.minecraft.core.BlockPos;
@@ -26,7 +25,6 @@ import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.RailBlock;
 import net.minecraft.world.level.block.state.properties.RailShape;
 
-import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashSet;
@@ -34,7 +32,7 @@ import java.util.List;
 import java.util.Set;
 
 /** Lifecycle, budget and readiness contract of the managed chunk tickets. */
-public final class ChunkTicketGameTests implements CustomTestMethodInvoker {
+public final class ChunkTicketGameTests extends GameTestSupport {
 	@GameTest(maxTicks = 100)
 	public void scannedChunkTicketIsAcquiredAndReleased(GameTestHelper helper) {
 		ChunkTicketManager tickets = Railway.get().tickets();
@@ -438,8 +436,4 @@ public final class ChunkTicketGameTests implements CustomTestMethodInvoker {
 		return keys.subList(0, count);
 	}
 
-	@Override
-	public void invokeTestMethod(GameTestHelper context, Method method) throws ReflectiveOperationException {
-		method.invoke(this, context);
-	}
 }

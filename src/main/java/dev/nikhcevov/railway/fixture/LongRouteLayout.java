@@ -140,10 +140,6 @@ public record LongRouteLayout(int originX, int baseY, int railZ, int routeLength
 		return new BlockLocation(homeDockX(), buttonY(), supportZ());
 	}
 
-	public BlockLocation destinationButtonSupport() {
-		return new BlockLocation(destinationDockX(), buttonY(), supportZ());
-	}
-
 	public BlockLocation homeExit() {
 		return new BlockLocation(homeDockX(), railY(), exitZ());
 	}

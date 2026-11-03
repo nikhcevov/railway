@@ -6,7 +6,6 @@ import dev.nikhcevov.railway.minecraft.PlayerActions;
 import dev.nikhcevov.railway.minecraft.RailWorld;
 import dev.nikhcevov.railway.network.RailShapeType;
 
-import net.fabricmc.fabric.api.gametest.v1.CustomTestMethodInvoker;
 import net.fabricmc.fabric.api.gametest.v1.GameTest;
 
 import net.minecraft.core.BlockPos;
@@ -17,10 +16,8 @@ import net.minecraft.world.entity.vehicle.minecart.Minecart;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.RailBlock;
 
-import java.lang.reflect.Method;
-
 /** Verifies the managed-cart speed clamp used by the 12 b/s target. */
-public final class SpeedGameTests implements CustomTestMethodInvoker {
+public final class SpeedGameTests extends GameTestSupport {
 	@GameTest(maxTicks = 60)
 	public void managedCartHoldsTwelveBlocksPerSecond(GameTestHelper helper) {
 		ServerLevel level = helper.getLevel();
@@ -57,8 +54,4 @@ public final class SpeedGameTests implements CustomTestMethodInvoker {
 		});
 	}
 
-	@Override
-	public void invokeTestMethod(GameTestHelper context, Method method) throws ReflectiveOperationException {
-		method.invoke(this, context);
-	}
 }

@@ -11,7 +11,6 @@ import dev.nikhcevov.railway.minecraft.Railway;
 import dev.nikhcevov.railway.persistence.TripRecord;
 
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerChunkEvents;
-import net.fabricmc.fabric.api.gametest.v1.CustomTestMethodInvoker;
 import net.fabricmc.fabric.api.gametest.v1.GameTest;
 
 import net.minecraft.core.BlockPos;
@@ -28,7 +27,6 @@ import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.entity.EntityTypeTest;
 
-import java.lang.reflect.Method;
 import java.util.List;
 import java.util.UUID;
 
@@ -39,7 +37,7 @@ import java.util.UUID;
  * cart in an entity-ticking plot chunk, so reconciliation never has to wait and
  * can never block the shared GameTest server's other trips.
  */
-public final class RecoveryGameTests implements CustomTestMethodInvoker {
+public final class RecoveryGameTests extends GameTestSupport {
 	private record Stations(StationId from, StationId to) {
 	}
 
@@ -398,8 +396,4 @@ public final class RecoveryGameTests implements CustomTestMethodInvoker {
 		return !found.isEmpty();
 	}
 
-	@Override
-	public void invokeTestMethod(GameTestHelper context, Method method) throws ReflectiveOperationException {
-		method.invoke(this, context);
-	}
 }

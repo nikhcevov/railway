@@ -39,20 +39,15 @@ class StationNamesTest {
 	}
 
 	@Test
-	void findDetectsAmbiguityAndKeepsFirstDisplaySpelling() {
+	void findMatchesNormalizedNamesWithinOneDimension() {
 		Station first = station("first", "Home", OVERWORLD);
 		Station duplicate = station("duplicate", "  home ", OVERWORLD);
 		Station otherDimension = station("other", "Home", NETHER);
 		List<Station> stations = List.of(first, duplicate, otherDimension);
 
 		assertEquals(List.of(first, duplicate), StationNames.find(stations, OVERWORLD, "hOmE"));
-		assertTrue(StationNames.isAmbiguous(stations, OVERWORLD, "home"));
-		assertFalse(StationNames.isAvailable(stations, OVERWORLD, "home"));
-		assertTrue(StationNames.unique(stations, OVERWORLD, "home").isEmpty());
-		assertEquals("Home", StationNames.displaySpelling(stations, OVERWORLD, "HOME").orElseThrow());
 		assertEquals(List.of(otherDimension), StationNames.find(stations, NETHER, "home"));
 		assertTrue(StationNames.find(stations, OVERWORLD, "Mine").isEmpty());
-		assertTrue(StationNames.isAvailable(stations, OVERWORLD, "Mine"));
 	}
 
 	@Test

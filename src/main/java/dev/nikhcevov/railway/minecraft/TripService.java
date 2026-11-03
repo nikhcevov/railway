@@ -52,7 +52,6 @@ import java.util.UUID;
 public final class TripService {
 	private static final double STOP_DISTANCE = 0.25;
 	private static final double STOP_SPEED = 1.0;
-	private static final double FINAL_SPEED = 0.1;
 	private static final double TURN_SPEED_LIMIT = 4.0;
 	private static final long ORPHAN_SWEEP_INTERVAL = 100;
 	private static final long WARNING_INTERVAL = 100;

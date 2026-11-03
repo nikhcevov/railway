@@ -250,7 +250,7 @@ reached `Done` successfully.
 
 Verified:
 
-- 226 unit tests and 53 GameTests, including automatic startup/on-demand scans,
+- 245 unit tests and 64 GameTests, including automatic startup/on-demand scans,
   retry cooldown, and scan-ticket isolation from background jobs;
 - live diagnostics;
 - live startup recovery with a tagged cart + checkpoint;

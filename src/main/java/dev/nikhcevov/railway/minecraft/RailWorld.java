@@ -17,7 +17,6 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
-import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.entity.vehicle.minecart.AbstractMinecart;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.block.BaseRailBlock;
@@ -28,7 +27,6 @@ import net.minecraft.world.level.block.state.properties.Property;
 import net.minecraft.world.level.block.state.properties.RailShape;
 import net.minecraft.world.phys.AABB;
 
-import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -137,6 +135,10 @@ public final class RailWorld implements GraphRailView {
 	 * its entity section is actually loaded. Loaded state alone is not enough.
 	 */
 	public boolean isPositionReady(BlockLocation location) {
+		return isPositionReady(level, location);
+	}
+
+	public static boolean isPositionReady(ServerLevel level, BlockLocation location) {
 		BlockPos pos = pos(location);
 		return level.isLoaded(pos)
 				&& level.isPositionEntityTicking(pos)

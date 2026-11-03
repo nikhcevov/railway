@@ -14,7 +14,6 @@ import dev.nikhcevov.railway.minecraft.SignRegistrationService;
 import dev.nikhcevov.railway.minecraft.TripService;
 import dev.nikhcevov.railway.persistence.WorldState;
 
-import net.fabricmc.fabric.api.gametest.v1.CustomTestMethodInvoker;
 import net.fabricmc.fabric.api.gametest.v1.GameTest;
 
 import net.minecraft.core.BlockPos;
@@ -37,7 +36,6 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.AttachFace;
 import net.minecraft.world.level.block.state.properties.RailShape;
 
-import java.lang.reflect.Method;
 import java.util.List;
 
 /**
@@ -45,7 +43,7 @@ import java.util.List;
  * {@link SignBlockEntity#updateSignText} and uses a real straight rail plus a stone
  * pillar in the test plot.
  */
-public final class SignGameTests implements CustomTestMethodInvoker {
+public final class SignGameTests extends GameTestSupport {
 	private static final int LINE_END = 7;
 	private static final int HOME_X = 1;
 	private static final int MINE_X = 6;
@@ -1243,18 +1241,9 @@ public final class SignGameTests implements CustomTestMethodInvoker {
 		return fixture.railway().state();
 	}
 
-	private static BlockLocation absolute(GameTestHelper helper, int x, int y, int z) {
-		return RailWorld.loc(helper.absolutePos(new BlockPos(x, y, z)));
-	}
-
 	private static void check(GameTestHelper helper, boolean condition, String message) {
 		if (!condition) {
 			throw helper.assertionException(message);
 		}
-	}
-
-	@Override
-	public void invokeTestMethod(GameTestHelper context, Method method) throws ReflectiveOperationException {
-		method.invoke(this, context);
 	}
 }

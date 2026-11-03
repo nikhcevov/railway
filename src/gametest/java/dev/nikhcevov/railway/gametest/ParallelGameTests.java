@@ -6,32 +6,20 @@ import dev.nikhcevov.railway.domain.FailureCode;
 import dev.nikhcevov.railway.domain.Station;
 import dev.nikhcevov.railway.domain.StationId;
 import dev.nikhcevov.railway.domain.TripId;
-import dev.nikhcevov.railway.minecraft.PlayerActions;
 import dev.nikhcevov.railway.minecraft.RailWorld;
 import dev.nikhcevov.railway.minecraft.Railway;
-import dev.nikhcevov.railway.minecraft.ScanService;
 import dev.nikhcevov.railway.minecraft.TripService;
-import dev.nikhcevov.railway.network.RailShapeType;
 
-import net.fabricmc.fabric.api.gametest.v1.CustomTestMethodInvoker;
 import net.fabricmc.fabric.api.gametest.v1.GameTest;
 
-import net.minecraft.core.BlockPos;
 import net.minecraft.gametest.framework.GameTestHelper;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.world.entity.Entity;
-import net.minecraft.world.entity.EntityType;
-import net.minecraft.world.entity.vehicle.minecart.Minecart;
 import net.minecraft.world.level.block.Blocks;
-import net.minecraft.world.level.block.RailBlock;
-import net.minecraft.world.level.entity.EntityTypeTest;
-
-import java.lang.reflect.Method;
 
 /** Two disconnected lines must launch and complete in parallel. */
-public final class ParallelGameTests implements CustomTestMethodInvoker {
+public final class ParallelGameTests extends GameTestSupport {
 	@GameTest(maxTicks = 600)
 	public void independentComponentsRunInParallel(GameTestHelper helper) {
 		Railway railway = Railway.get();
@@ -40,8 +28,8 @@ public final class ParallelGameTests implements CustomTestMethodInvoker {
 		String unique = Long.toString(System.nanoTime() & 0xFFFFFFL, 36);
 		String dimension = RailWorld.dimension(level);
 
-		buildLine(helper, 0);
-		buildLine(helper, 4);
+		buildLine(helper, 5, 0, 0, 5);
+		buildLine(helper, 5, 4, 0, 5);
 		BlockLocation button = absolute(helper, 0, 1, 3);
 		level.setBlock(RailWorld.pos(button), Blocks.STONE_BUTTON.defaultBlockState(), 2);
 
@@ -107,58 +95,4 @@ public final class ParallelGameTests implements CustomTestMethodInvoker {
 		return station;
 	}
 
-	private static void buildLine(GameTestHelper helper, int z) {
-		for (int x = 0; x <= 5; x++) {
-			helper.setBlock(new BlockPos(x, 0, z), Blocks.STONE);
-			BlockPos railPos = helper.absolutePos(new BlockPos(x, 1, z));
-			helper.getLevel().setBlock(railPos, Blocks.RAIL.defaultBlockState()
-					.setValue(RailBlock.SHAPE, RailWorld.vanillaShape(RailShapeType.EAST_WEST)), 2);
-		}
-		for (int x : new int[]{0, 5}) {
-			helper.setBlock(new BlockPos(x, 0, z + 2), Blocks.STONE);
-			helper.setBlock(new BlockPos(x, 1, z + 2), Blocks.AIR);
-			helper.setBlock(new BlockPos(x, 2, z + 2), Blocks.AIR);
-		}
-	}
-
-	private static void scan(GameTestHelper helper, ScanService scans, Station station, ServerLevel level,
-			MinecraftServer server) {
-		ScanService.StartResult result = scans.start(station, level, Railway.get().config(), server.getTickCount(),
-				Railway.get().state().revision());
-		if (!(result instanceof ScanService.StartResult.Started)) {
-			helper.fail("scan did not start: " + result);
-		}
-		for (int i = 0; i < 64 && scans.isRunning(station.id()); i++) {
-			scans.tick(server);
-		}
-		if (scans.graph(station.id()) == null) {
-			helper.fail("scan failed for " + station.id() + ": " + scans.failure(station.id()));
-		}
-	}
-
-	private static boolean tripActive(Railway railway, TripId trip) {
-		for (var active : railway.trips().activeTrips()) {
-			if (active.id().equals(trip)) {
-				return true;
-			}
-		}
-		return false;
-	}
-
-	private static void requireNoManagedCart(GameTestHelper helper, ServerLevel level) {
-		EntityTypeTest<Entity, Minecart> carts = EntityTypeTest.forClass(Minecart.class);
-		if (!level.getEntities(carts, helper.absoluteAABB(helper.getBounds().inflate(2.0)),
-				cart -> cart.entityTags().contains(PlayerActions.MANAGED_TAG)).isEmpty()) {
-			throw helper.assertionException("service cart was not removed");
-		}
-	}
-
-	private static BlockLocation absolute(GameTestHelper helper, int x, int y, int z) {
-		return RailWorld.loc(helper.absolutePos(new BlockPos(x, y, z)));
-	}
-
-	@Override
-	public void invokeTestMethod(GameTestHelper context, Method method) throws ReflectiveOperationException {
-		method.invoke(this, context);
-	}
 }

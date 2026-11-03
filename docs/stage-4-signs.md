@@ -1,8 +1,9 @@
 # Stage 4 service signs, combined pillar model
 
-Status: implementation contract for the first Stage 4 release. Supersedes the separate
-station-sign / destination-sign model in `Railway-Spec-v1.md` sections 7, 10, and 14 for
-new registrations. Keep the old reservation, trip, and station behavior.
+Status: historical implementation contract for the first Stage 4 release. Supersedes the
+separate station-sign / destination-sign model in `Railway-Spec-v1.md` sections 7, 10,
+and 14 for new registrations. The current user-facing contract is
+[`service-signs.md`](service-signs.md).
 
 ## Stage 4.1 extension (implemented)
 

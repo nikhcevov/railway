@@ -32,8 +32,8 @@ Implemented and tested through Stage 5 operations:
 - crash-recovery checkpoints and late-chunk reconciliation;
 - `/rail diagnostics`.
 
-See [`docs/stage-5-report.md`](docs/stage-5-report.md) for the current verification
-summary and remaining limitations.
+See [`docs/stage-5-report.md`](docs/stage-5-report.md) for the historical Stage 5
+verification snapshot; current acceptance gates live in [`TODO.md`](TODO.md).
 
 ## Install
 

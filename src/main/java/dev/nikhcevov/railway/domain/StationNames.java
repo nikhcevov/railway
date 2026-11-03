@@ -8,7 +8,6 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
-import java.util.Optional;
 import java.util.function.Predicate;
 
 /**
@@ -85,34 +84,6 @@ public final class StationNames {
 			}
 		}
 		return List.copyOf(matches);
-	}
-
-	/** The single station with this name, or empty when absent or ambiguous. */
-	public static Optional<Station> unique(Collection<Station> stations, String dimension, String name) {
-		Station found = null;
-		for (Station station : stations) {
-			if (matches(station, dimension, name)) {
-				if (found != null) {
-					return Optional.empty();
-				}
-				found = station;
-			}
-		}
-		return Optional.ofNullable(found);
-	}
-
-	public static boolean isAmbiguous(Collection<Station> stations, String dimension, String name) {
-		return find(stations, dimension, name).size() > 1;
-	}
-
-	public static boolean isAvailable(Collection<Station> stations, String dimension, String name) {
-		return find(stations, dimension, name).isEmpty();
-	}
-
-	/** Display spelling of the first station registered under this identity. */
-	public static Optional<String> displaySpelling(Collection<Station> stations, String dimension, String name) {
-		List<Station> matches = find(stations, dimension, name);
-		return matches.isEmpty() ? Optional.empty() : Optional.of(matches.getFirst().displayName());
 	}
 
 	/** Hidden deterministic identifier for a sign-created station with no collisions recorded. */

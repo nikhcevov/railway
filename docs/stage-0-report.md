@@ -2,6 +2,9 @@
 
 Date: 2026-10-26. Status: server-side de-risking complete; client checks marked below.
 
+> **Historical snapshot.** Retained as a record of the initial environment
+> validation; it is not a current status document.
+
 ## Pinned environment
 
 | Component | Version |

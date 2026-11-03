@@ -393,9 +393,4 @@ public final class LongRouteScenario {
 	private static void set(ServerLevel level, BlockLocation location, BlockState state) {
 		level.setBlock(RailWorld.pos(location), state, 2);
 	}
-
-	/** Returns the fixture station ids so callers can invalidate their scans. */
-	public static List<StationId> stationIds() {
-		return List.of(new StationId(HOME_ID), new StationId(MINE_ID));
-	}
 }

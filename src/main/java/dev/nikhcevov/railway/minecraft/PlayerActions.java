@@ -85,8 +85,4 @@ public final class PlayerActions {
 		}
 		return cart.isRemoved();
 	}
-
-	public static String tripTag(TripId tripId) {
-		return TRIP_TAG_PREFIX + tripId.value().toString().replace("-", "");
-	}
 }

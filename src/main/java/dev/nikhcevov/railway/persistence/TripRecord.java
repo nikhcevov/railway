@@ -54,10 +54,6 @@ public record TripRecord(
 		return new TripRecord(id, playerUuid, cartUuid, from, to, phase, startedTick, dimension, position);
 	}
 
-	public TripRecord withPhase(TripPhase phase) {
-		return new TripRecord(id, playerUuid, cartUuid, from, to, phase, startedTick, dimension, position);
-	}
-
 	/** Drops the position, keeping the identity used by reconciliation. */
 	public TripRecord withoutCheckpoint() {
 		return new TripRecord(id, playerUuid, cartUuid, from, to, phase, startedTick);

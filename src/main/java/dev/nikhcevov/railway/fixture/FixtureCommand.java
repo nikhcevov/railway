@@ -7,7 +7,6 @@ import com.mojang.brigadier.suggestion.SuggestionProvider;
 
 import dev.nikhcevov.railway.domain.BlockLocation;
 import dev.nikhcevov.railway.minecraft.PlayerActions;
-import dev.nikhcevov.railway.minecraft.RailWorld;
 import dev.nikhcevov.railway.minecraft.Railway;
 
 import net.minecraft.commands.CommandSourceStack;

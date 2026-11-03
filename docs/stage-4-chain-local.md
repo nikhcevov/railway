@@ -1,7 +1,8 @@
 # Stage 4.1 chained pillars, local departure, optional main flag
 
-Status: implementation contract for the next Stage 4 increment. It extends
-`docs/stage-4-signs.md`; where they differ, this file wins.
+Status: historical implementation contract for the Stage 4.1 increment. It extends
+`docs/stage-4-signs.md`; where they differ, this file wins. The current user-facing
+contract is [`service-signs.md`](service-signs.md).
 
 ## Goal
 
