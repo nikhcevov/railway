@@ -5,6 +5,7 @@ import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.context.CommandContext;
 import com.mojang.brigadier.suggestion.SuggestionProvider;
 
+import dev.nikhcevov.railway.domain.ArrivalPlatform;
 import dev.nikhcevov.railway.domain.Binding;
 import dev.nikhcevov.railway.domain.BlockLocation;
 import dev.nikhcevov.railway.domain.Failure;
@@ -42,6 +43,9 @@ import java.util.function.Predicate;
 /** Public {@code /rail} command surface for stage 1. */
 public final class RailCommand {
 	private static final double TARGET_RANGE = 5.0;
+	private static final double ARRIVAL_EXIT_HORIZONTAL = 4.0;
+	private static final int ARRIVAL_EXIT_VERTICAL = 3;
+	private static final double ARRIVAL_DOCK_HORIZONTAL = 64.0;
 	private static final Predicate<CommandSourceStack> OP2 =
 			source -> source.permissions().hasPermission(Permissions.COMMANDS_GAMEMASTER);
 
@@ -77,6 +81,15 @@ public final class RailCommand {
 						.then(Commands.literal("exit").requires(OP2)
 								.then(Commands.argument("id", StringArgumentType.word()).suggests(STATIONS)
 										.executes(RailCommand::stationExit)))
+						.then(Commands.literal("arrival").requires(OP2)
+								.then(Commands.literal("set")
+										.then(Commands.argument("station", StringArgumentType.word()).suggests(STATIONS)
+												.then(Commands.argument("from", StringArgumentType.word()).suggests(STATIONS)
+														.executes(RailCommand::arrivalSet))))
+								.then(Commands.literal("remove")
+										.then(Commands.argument("station", StringArgumentType.word()).suggests(STATIONS)
+												.then(Commands.argument("from", StringArgumentType.word()).suggests(STATIONS)
+														.executes(RailCommand::arrivalRemove)))))
 						.then(Commands.literal("rename").requires(OP2)
 								.then(Commands.argument("id", StringArgumentType.word()).suggests(STATIONS)
 										.then(Commands.argument("displayName", StringArgumentType.greedyString())
@@ -211,6 +224,94 @@ public final class RailCommand {
 		return ok(context.getSource(), "station.exit_set", station.displayName(), exit.shortString());
 	}
 
+	private static int arrivalSet(CommandContext<CommandSourceStack> context) {
+		Railway railway = railway(context.getSource());
+		ServerPlayer player = player(context.getSource());
+		if (railway == null || player == null) {
+			return 0;
+		}
+		CommandSourceStack source = context.getSource();
+		Station destination = station(source, StringArgumentType.getString(context, "station"));
+		Station from = station(source, StringArgumentType.getString(context, "from"));
+		if (destination == null || from == null) {
+			return 0;
+		}
+		if (destination.isProvisional()) {
+			return fail(source, Failure.detail(FailureCode.DESTINATION_NOT_ANCHORED,
+					destination.displayName()));
+		}
+		if (!destination.hasExit()) {
+			return fail(source, Failure.detail(FailureCode.STATION_INCOMPLETE, destination.displayName()));
+		}
+		if (from.id().equals(destination.id())) {
+			return fail(source, Failure.detail(FailureCode.ARRIVAL_PLATFORM,
+					"source and destination must be different stations"));
+		}
+		if (from.isProvisional()) {
+			return fail(source, Failure.detail(FailureCode.ARRIVAL_PLATFORM,
+					"source station must be anchored"));
+		}
+		if (!from.dimension().equals(destination.dimension())) {
+			return fail(source, Failure.detail(FailureCode.ARRIVAL_PLATFORM,
+					"stations are in different dimensions"));
+		}
+		ServerLevel level = player.level();
+		if (!destination.dimension().equals(RailWorld.dimension(level))) {
+			return fail(source, Failure.detail(FailureCode.ARRIVAL_PLATFORM,
+					"player is in another dimension"));
+		}
+		BlockLocation dock = targetedBlock(player, source);
+		if (dock == null) {
+			return 0;
+		}
+		RailWorld world = new RailWorld(level);
+		Failure dockFailure = dockFailure(world.graphProbe(dock), dock);
+		if (dockFailure != null) {
+			return fail(source, dockFailure);
+		}
+		BlockLocation exit = RailWorld.loc(player.blockPosition());
+		if (!world.isSafeStand(exit)) {
+			return fail(source, Failure.at(FailureCode.EXIT_UNSAFE, exit));
+		}
+		if (horizontalDistance(exit, dock) > ARRIVAL_EXIT_HORIZONTAL
+				|| Math.abs(exit.y() - dock.y()) > ARRIVAL_EXIT_VERTICAL) {
+			return fail(source, Failure.detail(FailureCode.ARRIVAL_PLATFORM,
+					"exit must be within 4 horizontal and 3 vertical blocks of the dock"));
+		}
+		if (horizontalDistance(dock, destination.dock()) > ARRIVAL_DOCK_HORIZONTAL) {
+			return fail(source, Failure.detail(FailureCode.ARRIVAL_PLATFORM,
+					"dock must be within 64 horizontal blocks of the station main dock"));
+		}
+		Station updated = destination.withArrivalPlatform(
+				new ArrivalPlatform(from.id(), dock, exit, player.getYRot()),
+				railway.state().nextRevision());
+		railway.state().updateStation(updated);
+		railway.saveState();
+		return ok(source, "station.arrival_set", destination.displayName(), from.displayName(),
+				dock.shortString(), exit.shortString());
+	}
+
+	private static int arrivalRemove(CommandContext<CommandSourceStack> context) {
+		Railway railway = railway(context.getSource());
+		if (railway == null) {
+			return 0;
+		}
+		CommandSourceStack source = context.getSource();
+		Station destination = station(source, StringArgumentType.getString(context, "station"));
+		Station from = station(source, StringArgumentType.getString(context, "from"));
+		if (destination == null || from == null) {
+			return 0;
+		}
+		if (destination.arrivalFrom(from.id()).isEmpty()) {
+			return fail(source, Failure.detail(FailureCode.ARRIVAL_PLATFORM,
+					"no arrival platform from " + from.id().value()));
+		}
+		railway.state().updateStation(
+				destination.withoutArrivalPlatform(from.id(), railway.state().nextRevision()));
+		railway.saveState();
+		return ok(source, "station.arrival_removed", destination.displayName(), from.displayName());
+	}
+
 	private static int stationRename(CommandContext<CommandSourceStack> context) {
 		Railway railway = railway(context.getSource());
 		if (railway == null) {
@@ -316,6 +417,11 @@ public final class RailCommand {
 					station.dock().shortString()), false);
 		} else {
 			source.sendSuccess(() -> Messages.text(source, "station.info.main_missing"), false);
+		}
+		for (ArrivalPlatform platform : station.arrivalPlatforms()) {
+			source.sendSuccess(() -> Messages.text(source, "station.info.arrival",
+					platform.source().value(), platform.dock().shortString(),
+					platform.exit().shortString()), false);
 		}
 		Collection<Binding> bindings = railway.state().bindingsFor(station.id());
 		if (bindings.isEmpty()) {
@@ -608,12 +714,16 @@ public final class RailCommand {
 		if (!to.enabled()) {
 			return fail(source, Failure.detail(FailureCode.STATION_DISABLED, to.displayName()));
 		}
+		// Use the destination's platform for this source, falling back to main.
+		ArrivalPlatform platform = to.arrivalFrom(from.id()).orElse(null);
+		BlockLocation arrivalDock = platform != null ? platform.dock() : to.dock();
+		BlockLocation arrivalExit = platform != null ? platform.exit() : to.exit();
 		// One scan covers its whole connected component. Reuse it when it already
 		// contains the other endpoint, so a missing destination scan does not hide a
 		// route that the source graph proves.
 		RailGraph fromGraph = railway.scans().graph(from.id());
 		RailGraph toGraph = railway.scans().graph(to.id());
-		if (fromGraph != null && toGraph == null && fromGraph.rail(to.dock()) != null) {
+		if (fromGraph != null && toGraph == null && fromGraph.rail(arrivalDock) != null) {
 			toGraph = fromGraph;
 		}
 		if (toGraph != null && fromGraph == null && toGraph.rail(from.dock()) != null) {
@@ -635,7 +745,7 @@ public final class RailCommand {
 			return fail(source, Failure.of(FailureCode.NO_PATH));
 		}
 		RailGraphPlanner.Result result = RailGraphPlanner.plan(fromGraph, from.id(), to.id(),
-				from.dock(), to.dock(), railway.config().maxRouteLength());
+				from.dock(), arrivalDock, railway.config().maxRouteLength());
 		if (result instanceof RailGraphPlanner.Result.Rejected rejected) {
 			return fail(source, rejected.failure());
 		}
@@ -649,8 +759,8 @@ public final class RailCommand {
 		if (worldFailure != null) {
 			return fail(source, worldFailure);
 		}
-		if (world.isLoaded(to.exit()) && !world.isSafeStand(to.exit())) {
-			return fail(source, Failure.at(FailureCode.EXIT_UNSAFE, to.exit()));
+		if (world.isLoaded(arrivalExit) && !world.isSafeStand(arrivalExit)) {
+			return fail(source, Failure.at(FailureCode.EXIT_UNSAFE, arrivalExit));
 		}
 		return ok(source, "route.ok", from.id().value(), to.id().value(), Integer.toString(plan.length()),
 				Integer.toString(fromGraph.rails().size()), Integer.toString(plan.switches().size()),
@@ -847,6 +957,10 @@ public final class RailCommand {
 			return null;
 		}
 		return target.get();
+	}
+
+	private static double horizontalDistance(BlockLocation a, BlockLocation b) {
+		return Math.hypot(a.x() - b.x(), a.z() - b.z());
 	}
 
 	private static Failure dockFailure(GraphRailView.Probe probe, BlockLocation dock) {

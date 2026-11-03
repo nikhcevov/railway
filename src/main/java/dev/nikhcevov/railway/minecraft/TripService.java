@@ -5,6 +5,7 @@ import dev.nikhcevov.railway.diagnostics.DiagnosticsReport;
 import dev.nikhcevov.railway.dispatch.ChunkWindow;
 import dev.nikhcevov.railway.dispatch.ReservationManager;
 import dev.nikhcevov.railway.dispatch.RouteResourcePlanner;
+import dev.nikhcevov.railway.domain.ArrivalPlatform;
 import dev.nikhcevov.railway.domain.Binding;
 import dev.nikhcevov.railway.domain.BlockLocation;
 import dev.nikhcevov.railway.domain.Failure;
@@ -74,6 +75,8 @@ public final class TripService {
 		final Minecart cart;
 		final RailWorld world;
 		final GraphRoutePlan plan;
+		final BlockLocation arrivalExit;
+		final float arrivalYaw;
 		final MotionProfile profile;
 		final Map<BlockLocation, RailShapeType> requiredSwitches;
 		final Set<BlockLocation> preparedSwitches = new LinkedHashSet<>();
@@ -98,13 +101,16 @@ public final class TripService {
 		long lastCheckpointTick;
 		TripPhase lastCheckpointPhase;
 
-		ActiveTrip(Trip trip, Minecart cart, RailWorld world, GraphRoutePlan plan, MotionProfile profile,
+		ActiveTrip(Trip trip, Minecart cart, RailWorld world, GraphRoutePlan plan,
+				BlockLocation arrivalExit, float arrivalYaw, MotionProfile profile,
 				double safetyMargin, long graphRevision, int maxTripTicks, long departureTick,
 				int maxChunkTickets) {
 			this.trip = trip;
 			this.cart = cart;
 			this.world = world;
 			this.plan = plan;
+			this.arrivalExit = arrivalExit;
+			this.arrivalYaw = arrivalYaw;
 			this.profile = profile;
 			this.safetyMargin = safetyMargin;
 			this.graphRevision = graphRevision;
@@ -210,6 +216,10 @@ public final class TripService {
 		if (!to.hasExit()) {
 			return reject(FailureCode.STATION_INCOMPLETE, to.displayName());
 		}
+		ArrivalPlatform platform = to.arrivalFrom(from.id()).orElse(null);
+		BlockLocation arrivalDock = platform != null ? platform.dock() : to.dock();
+		BlockLocation arrivalExit = platform != null ? platform.exit() : to.exit();
+		float arrivalYaw = platform != null ? platform.yaw() : to.exitYaw();
 
 		ServerLevel level = RailWorld.level(server, from.dimension());
 		if (level == null) {
@@ -246,14 +256,14 @@ public final class TripService {
 		// therefore enough when it already contains the other endpoint's dock: after a
 		// restart only the origin may have been rescanned, while its graph still spans
 		// the destination. Do not start a destination scan in that case.
-		if (toGraph == null && (fromGraph == null || fromGraph.rail(to.dock()) == null)) {
+		if (toGraph == null && (fromGraph == null || fromGraph.rail(arrivalDock) == null)) {
 			toLookup = graphOrFailure(to);
 			toGraph = toLookup instanceof GraphLookup.Found found ? found.graph() : null;
 		}
 		if (fromGraph == null && toGraph != null && toGraph.rail(departureDock) != null) {
 			fromGraph = toGraph;
 		}
-		if (toGraph == null && fromGraph != null && fromGraph.rail(to.dock()) != null) {
+		if (toGraph == null && fromGraph != null && fromGraph.rail(arrivalDock) != null) {
 			toGraph = fromGraph;
 		}
 		if (fromGraph == null) {
@@ -274,7 +284,7 @@ public final class TripService {
 		}
 
 		RailGraphPlanner.Result planned = RailGraphPlanner.plan(fromGraph, from.id(), to.id(),
-				departureDock, to.dock(), config.maxRouteLength());
+				departureDock, arrivalDock, config.maxRouteLength());
 		if (planned instanceof RailGraphPlanner.Result.Rejected rejected) {
 			return reject(rejected.failure());
 		}
@@ -289,8 +299,8 @@ public final class TripService {
 		}
 		// If the destination is already loaded, keep failing early on an unsafe
 		// exit. Otherwise the exit is checked once the cart reaches its chunk.
-		if (world.isLoaded(to.exit()) && !world.isSafeStand(to.exit())) {
-			return reject(Failure.at(FailureCode.EXIT_UNSAFE, to.exit()));
+		if (world.isLoaded(arrivalExit) && !world.isSafeStand(arrivalExit)) {
+			return reject(Failure.at(FailureCode.EXIT_UNSAFE, arrivalExit));
 		}
 		if (world.isPathOccupied(plan, player.getUUID(), new UUID(0L, 0L))) {
 			return reject(FailureCode.PATH_OCCUPIED, null);
@@ -301,6 +311,9 @@ public final class TripService {
 		for (Station station : railway.state().stations()) {
 			if (station.isAnchored()) {
 				docks.add(station.dock());
+				for (ArrivalPlatform arrival : station.arrivalPlatforms()) {
+					docks.add(arrival.dock());
+				}
 			}
 		}
 		for (Binding other : railway.state().bindings()) {
@@ -342,8 +355,8 @@ public final class TripService {
 					config.braking(),
 					0.1
 			);
-			ActiveTrip activeTrip = new ActiveTrip(trip, cart, world, plan, profile,
-					config.safetyMargin(), fromGraph.revision(), config.maxTripTicks(),
+			ActiveTrip activeTrip = new ActiveTrip(trip, cart, world, plan, arrivalExit, arrivalYaw,
+					profile, config.safetyMargin(), fromGraph.revision(), config.maxTripTicks(),
 					tick + config.boardingDelayTicks(), config.maxManagedChunkTickets());
 			Failure switchFailure = prepareLoadedSwitches(activeTrip);
 			if (switchFailure != null) {
@@ -791,11 +804,8 @@ public final class TripService {
 			notifyAborted(player);
 			return;
 		}
-		BlockLocation exit = plan.steps().getLast().pos().offset(0, 0, 0);
+		BlockLocation exit = at.arrivalExit;
 		Station station = railway.state().station(plan.to()).orElse(null);
-		if (station != null && station.hasExit()) {
-			exit = station.exit();
-		}
 		if (!at.world.isPositionReady(exit)) {
 			waitForArrival(at, player, tick, exit, FailureCode.CHUNKS_NOT_READY);
 			return;
@@ -816,7 +826,7 @@ public final class TripService {
 			}
 		}
 
-		PlayerActions.dismountTo(player, at.world.level(), target, station == null ? 0.0F : station.exitYaw());
+		PlayerActions.dismountTo(player, at.world.level(), target, at.arrivalYaw);
 		boolean removed = PlayerActions.discardCart(at.cart);
 		at.trip.transitionTo(TripPhase.COMPLETED, tick);
 		if (removed) {

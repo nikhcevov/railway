@@ -33,7 +33,8 @@ server; no client mod, resource pack, or custom blocks are required.
 - **Automatic service carts.** Pressing a destination button spawns a managed
   minecart, seats the passenger, and follows the route.
 - **Safe arrivals.** The cart stops at the destination dock and the passenger is
-  moved to the station exit.
+  moved to the destination exit. A per-origin arrival platform can be configured
+  by command for a specific source station.
 - **Long routes.** Scans automatically load existing rail chunks through a bounded
   ticket window; a destination outside the simulation distance can still be
   reached.
@@ -119,6 +120,7 @@ buttons.
 ```text
 /rail station create <id> <displayName...>
 /rail station exit <id>
+/rail station arrival set|remove <station> <from>
 /rail station rename <id> <displayName...>
 /rail station enable|disable <id>
 /rail station info <id>
@@ -183,8 +185,8 @@ new terrain generation while scanning.
 - Tested with Minecraft `26.1.2` and the Fabric versions listed above.
 - Tested server stack: C2ME, Lithium, Krypton, FerriteCore, and Clumps.
 - Other optimization or movement mods are not automatically supported.
-- Arrival is always at the station main exit. Per-origin arrival platforms are not
-  implemented.
+- Per-origin arrival platforms are configured by command, not by a sign flag.
+  Without one, arrival uses the destination main exit.
 - No queues, cargo, schedules, portals, custom rails, or GUI.
 - Detector and activator rails are rejected by managed routes.
 - Ordinary decorative signs are ignored.

@@ -1,5 +1,6 @@
 package dev.nikhcevov.railway.persistence;
 
+import dev.nikhcevov.railway.domain.ArrivalPlatform;
 import dev.nikhcevov.railway.domain.Binding;
 import dev.nikhcevov.railway.domain.BlockLocation;
 import dev.nikhcevov.railway.domain.SignMarker;
@@ -122,6 +123,20 @@ class JsonStateStoreTest {
 				new StationId(from), new StationId(to));
 	}
 
+	private static String platformJson(String source, int dockX, int exitX, float yaw) {
+		return """
+				{"source":{"value":"%s"},"dock":{"x":%d,"y":64,"z":0},"exit":{"x":%d,"y":64,"z":0},"yaw":%s}
+				""".formatted(source, dockX, exitX, yaw).strip();
+	}
+
+	private static String stationWithPlatformsJson(String id, int revision, String... platforms) {
+		return """
+				{"id":{"value":"%s"},"displayName":"Station %s","dimension":"minecraft:overworld",\
+				"dock":{"x":0,"y":64,"z":0},"exit":{"x":1,"y":64,"z":0},"exitYaw":90.0,\
+				"enabled":true,"revision":%d,"arrivalPlatforms":[%s]}
+				""".formatted(id, id, revision, String.join(",", platforms)).strip();
+	}
+
 	private static UUID deterministicUuid(String prefix, int discriminator) {
 		return UUID.nameUUIDFromBytes((prefix + '-' + discriminator).getBytes(StandardCharsets.UTF_8));
 	}
@@ -235,14 +250,14 @@ class JsonStateStoreTest {
 
 		store.save(loaded);
 		String saved = Files.readString(store.file(), StandardCharsets.UTF_8);
-		assertTrue(saved.contains("\"schemaVersion\": 4"), saved);
+		assertTrue(saved.contains("\"schemaVersion\": 5"), saved);
 		assertFalse(saved.contains("\"position\""), "a positionless checkpoint hides the position field");
 		WorldState reloaded = new JsonStateStore(tempDir).load();
 		assertEquals(List.of(checkpoint), reloaded.trips());
 	}
 
 	@Test
-	void checkpointPositionAndDimensionRoundTripInSchemaFour() throws IOException, StateStore.StateException {
+	void checkpointPositionAndDimensionRoundTripInSchemaFive() throws IOException, StateStore.StateException {
 		WorldState state = new WorldState();
 		state.addStation(station("alpha", 1));
 		state.addStation(station("beta", 2));
@@ -253,7 +268,7 @@ class JsonStateStoreTest {
 		JsonStateStore store = new JsonStateStore(tempDir);
 		store.save(state);
 		String json = Files.readString(store.file(), StandardCharsets.UTF_8);
-		assertTrue(json.contains("\"schemaVersion\": 4"), json);
+		assertTrue(json.contains("\"schemaVersion\": 5"), json);
 		assertTrue(json.contains("\"position\""), json);
 		assertTrue(json.contains("\"dimension\": \"minecraft:overworld\""), json);
 
@@ -279,7 +294,7 @@ class JsonStateStoreTest {
 				}
 				""";
 		writeState("""
-				{"schemaVersion": 4, "revision": 2, "stations": [%s, %s], "bindings": [], "trips": [%s]}
+				{"schemaVersion": 5, "revision": 2, "stations": [%s, %s], "bindings": [], "trips": [%s]}
 				""".formatted(ALPHA_JSON, BETA_JSON, tripJson));
 
 		WorldState loaded = new JsonStateStore(tempDir).load();
@@ -352,7 +367,7 @@ class JsonStateStoreTest {
 	void futureSchemaIsRejectedAndFileIsLeftUntouched() throws IOException {
 		Path file = stateFile();
 		writeState("""
-				{"schemaVersion": 5, "revision": 7, "stations": [], "bindings": [], "trips": []}
+				{"schemaVersion": 6, "revision": 7, "stations": [], "bindings": [], "trips": []}
 				""");
 		byte[] original = Files.readAllBytes(file);
 
@@ -389,7 +404,7 @@ class JsonStateStoreTest {
 		assertEquals(expected, store.file());
 		assertTrue(Files.isRegularFile(expected));
 		String json = Files.readString(expected, StandardCharsets.UTF_8);
-		assertTrue(json.contains("\"schemaVersion\": 4"), json);
+		assertTrue(json.contains("\"schemaVersion\": 5"), json);
 	}
 
 	@Test
@@ -429,7 +444,7 @@ class JsonStateStoreTest {
 	}
 
 	@Test
-	void versionOneStateIsBackedUpAndMigratedToVersionFour() throws IOException, StateStore.StateException {
+	void versionOneStateIsBackedUpAndMigratedToVersionFive() throws IOException, StateStore.StateException {
 		String original = """
 				{"schemaVersion": 1, "revision": 2, "stations": [%s, %s], "bindings": [%s], "trips": []}
 				""".formatted(ALPHA_JSON, BETA_JSON, BINDING_JSON);
@@ -450,7 +465,7 @@ class JsonStateStoreTest {
 
 		store.save(loaded);
 		String saved = Files.readString(store.file(), StandardCharsets.UTF_8);
-		assertTrue(saved.contains("\"schemaVersion\": 4"), saved);
+		assertTrue(saved.contains("\"schemaVersion\": 5"), saved);
 		assertTrue(saved.contains("\"signMarkers\": []"), saved);
 		assertFalse(saved.contains("\"sourceDock\""), "a null source dock is omitted, not serialized");
 		WorldState reloaded = new JsonStateStore(tempDir).load();
@@ -631,7 +646,7 @@ class JsonStateStoreTest {
 		JsonStateStore store = new JsonStateStore(tempDir);
 		store.save(original);
 		String json = Files.readString(store.file(), StandardCharsets.UTF_8);
-		assertTrue(json.contains("\"schemaVersion\": 4"), json);
+		assertTrue(json.contains("\"schemaVersion\": 5"), json);
 		assertTrue(json.contains("\"sourceDock\""), json);
 		assertTrue(json.contains("\"stationId\""), json);
 		assertTrue(json.contains("\"main\": true"), json);
@@ -664,7 +679,7 @@ class JsonStateStoreTest {
 		JsonStateStore store = new JsonStateStore(tempDir);
 		store.save(original);
 		String json = Files.readString(store.file(), StandardCharsets.UTF_8);
-		assertTrue(json.contains("\"schemaVersion\": 4"), json);
+		assertTrue(json.contains("\"schemaVersion\": 5"), json);
 		assertTrue(json.contains("\"main\": true"), json);
 
 		WorldState loaded = new JsonStateStore(tempDir).load();
@@ -683,7 +698,7 @@ class JsonStateStoreTest {
 	}
 
 	@Test
-	void versionTwoStateMigratesToVersionFourWithInferredMarkerOwners()
+	void versionTwoStateMigratesToVersionFiveWithInferredMarkerOwners()
 			throws IOException, StateStore.StateException {
 		String bindingJson = """
 				{"dimension":"minecraft:overworld","button":{"x":6,"y":65,"z":2},\
@@ -730,7 +745,7 @@ class JsonStateStoreTest {
 
 		store.save(loaded);
 		String saved = Files.readString(store.file(), StandardCharsets.UTF_8);
-		assertTrue(saved.contains("\"schemaVersion\": 4"), saved);
+		assertTrue(saved.contains("\"schemaVersion\": 5"), saved);
 		assertTrue(saved.contains("\"stationId\": {"), saved);
 		WorldState reloaded = new JsonStateStore(tempDir).load();
 		assertEquals(new StationId("alpha"),
@@ -765,5 +780,97 @@ class JsonStateStoreTest {
 				() -> new JsonStateStore(tempDir).load());
 
 		assertTrue(error.getMessage().contains("unknown station"), error::getMessage);
+	}
+
+	@Test
+	void arrivalPlatformsRoundTripInSchemaFive() throws IOException, StateStore.StateException {
+		Station alpha = station("alpha", 5);
+		Station beta = station("beta", 6);
+		ArrivalPlatform platform = new ArrivalPlatform(alpha.id(),
+				new BlockLocation(20, 64, 5), new BlockLocation(21, 64, 5), 45.0F);
+		WorldState original = new WorldState();
+		original.addStation(alpha);
+		original.addStation(beta.withArrivalPlatform(platform, 7));
+
+		JsonStateStore store = new JsonStateStore(tempDir);
+		store.save(original);
+		String json = Files.readString(store.file(), StandardCharsets.UTF_8);
+		assertTrue(json.contains("\"schemaVersion\": 5"), json);
+		assertTrue(json.contains("\"arrivalPlatforms\""), json);
+
+		WorldState loaded = new JsonStateStore(tempDir).load();
+
+		Station loadedBeta = loaded.station(beta.id()).orElseThrow();
+		assertEquals(List.of(platform), loadedBeta.arrivalPlatforms());
+		assertEquals(platform, loadedBeta.arrivalFrom(alpha.id()).orElseThrow());
+		assertEquals(7, loadedBeta.revision());
+		assertTrue(loaded.station(alpha.id()).orElseThrow().arrivalPlatforms().isEmpty());
+		assertEquals(original.revision(), loaded.revision());
+	}
+
+	@Test
+	void schemaFourStateMigratesWithEmptyArrivalPlatformsAndBackup()
+			throws IOException, StateStore.StateException {
+		String original = """
+				{"schemaVersion": 4, "revision": 2, "stations": [%s, %s], "bindings": [], "trips": []}
+				""".formatted(ALPHA_JSON,
+				stationWithPlatformsJson("beta", 2, platformJson("alpha", 40, 41, 45.0F)));
+		writeState(original);
+		JsonStateStore store = new JsonStateStore(tempDir);
+
+		WorldState loaded = store.load();
+
+		assertTrue(loaded.station(new StationId("beta")).orElseThrow().arrivalPlatforms().isEmpty(),
+				"a pre-schema-5 file must migrate with empty arrival platforms");
+		Path backup = tempDir.resolve("railway").resolve("state.v4.bak");
+		assertTrue(Files.isRegularFile(backup), "migrating v4 must keep the rolling backup");
+		assertEquals(original, Files.readString(backup, StandardCharsets.UTF_8));
+
+		store.save(loaded);
+		String saved = Files.readString(store.file(), StandardCharsets.UTF_8);
+		assertTrue(saved.contains("\"schemaVersion\": 5"), saved);
+		assertTrue(saved.contains("\"arrivalPlatforms\": []"), saved);
+		assertFalse(saved.contains("\"source\""), "migrated-empty platforms hide the source field");
+		assertTrue(new JsonStateStore(tempDir).load()
+				.station(new StationId("beta")).orElseThrow().arrivalPlatforms().isEmpty());
+	}
+
+	@Test
+	void duplicateArrivalPlatformSourceIsRejected() throws IOException {
+		String platform = platformJson("alpha", 20, 21, 45.0F);
+		writeState("""
+				{"schemaVersion": 5, "revision": 2, "stations": [%s, %s], "bindings": [], "trips": []}
+				""".formatted(ALPHA_JSON, stationWithPlatformsJson("beta", 2, platform, platform)));
+
+		StateStore.StateException error = assertThrows(StateStore.StateException.class,
+				() -> new JsonStateStore(tempDir).load());
+
+		assertTrue(error.getMessage().contains("duplicate arrival platform"), error::getMessage);
+	}
+
+	@Test
+	void unknownArrivalPlatformSourceIsRejected() throws IOException {
+		writeState("""
+				{"schemaVersion": 5, "revision": 2, "stations": [%s, %s], "bindings": [], "trips": []}
+				""".formatted(ALPHA_JSON,
+				stationWithPlatformsJson("beta", 2, platformJson("ghost", 20, 21, 45.0F))));
+
+		StateStore.StateException error = assertThrows(StateStore.StateException.class,
+				() -> new JsonStateStore(tempDir).load());
+
+		assertTrue(error.getMessage().contains("unknown station"), error::getMessage);
+	}
+
+	@Test
+	void arrivalPlatformSourceMustDifferFromItsStation() throws IOException {
+		writeState("""
+				{"schemaVersion": 5, "revision": 2, "stations": [%s, %s], "bindings": [], "trips": []}
+				""".formatted(ALPHA_JSON,
+				stationWithPlatformsJson("beta", 2, platformJson("beta", 20, 21, 45.0F))));
+
+		StateStore.StateException error = assertThrows(StateStore.StateException.class,
+				() -> new JsonStateStore(tempDir).load());
+
+		assertTrue(error.getMessage().contains("must differ"), error::getMessage);
 	}
 }

@@ -312,7 +312,7 @@ public final class SignRegistrationService {
 					state.addStation(stationFrom);
 				} else {
 					stationFrom = new Station(from.id(), from.displayName(), dimension, dock, exit,
-							player.getYRot(), true, state.nextRevision());
+							player.getYRot(), true, state.nextRevision(), from.arrivalPlatforms());
 					state.updateStation(stationFrom);
 				}
 			} else {

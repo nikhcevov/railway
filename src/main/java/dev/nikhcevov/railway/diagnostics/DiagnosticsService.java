@@ -1,6 +1,7 @@
 package dev.nikhcevov.railway.diagnostics;
 
 import dev.nikhcevov.railway.commands.Messages;
+import dev.nikhcevov.railway.domain.ArrivalPlatform;
 import dev.nikhcevov.railway.domain.Binding;
 import dev.nikhcevov.railway.domain.Station;
 import dev.nikhcevov.railway.domain.StationId;
@@ -111,10 +112,16 @@ public final class DiagnosticsService {
 			bindings.add(new DiagnosticsReport.BindingSummary(binding.fromStationId(),
 					binding.toStationId(), binding.button(), binding.sourceDock()));
 		}
+		List<DiagnosticsReport.ArrivalSummary> arrivals = new ArrayList<>();
+		for (ArrivalPlatform platform : station.arrivalPlatforms()) {
+			arrivals.add(new DiagnosticsReport.ArrivalSummary(platform.source(), platform.dock(),
+					platform.exit()));
+		}
 		ScanService.Status status = railway.scans().status(station.id()).orElse(null);
 		return new DiagnosticsReport.StationSummary(
 				station.id(), station.displayName(), station.dimension(), station.enabled(),
 				station.revision(), station.isProvisional(), station.dock(), station.exit(),
+				arrivals,
 				railway.state().signUnitCount(station.id()),
 				railway.state().mainMarkerForStation(station.id()).orElse(null),
 				bindings, status == null ? null : scan(status));

@@ -28,6 +28,7 @@ Implemented and tested through Stage 5 operations:
 - managed-cart speed control and atomic route reservations;
 - construction from vanilla wall signs and stone buttons;
 - chained station pillars, local departure docks, and optional main-arrival flag;
+- per-origin arrival platforms configured with `/rail station arrival set`;
 - bounded local chunk tickets and readiness gates;
 - crash-recovery checkpoints and late-chunk reconciliation;
 - `/rail diagnostics`.
@@ -108,8 +109,9 @@ Rules:
 - Save the sign after placing the button. If you add/remove the button later,
   save the sign again.
 
-Departure is always from the pressed pillar's local dock. Arrival is always at the
-station's main dock/exit. To move main, put `m` on another pillar and save it.
+Departure is always from the pressed pillar's local dock. Arrival uses the
+station's main dock/exit unless a per-origin arrival platform is configured for
+the source station. To move main, put `m` on another pillar and save it.
 
 ## Passenger flow
 
@@ -118,8 +120,9 @@ station's main dock/exit. To move main, put `m` on another pillar and save it.
    window.
 3. A service cart spawns at the local dock; the passenger is seated automatically.
 4. The cart follows the graph route through turnouts and curves.
-5. It stops at the destination main dock and teleports the passenger to the
-   station exit with the stored yaw.
+5. It stops at the destination dock and teleports the passenger to the
+   destination exit with the stored yaw. The dock/exit is the per-origin arrival
+   platform when one exists, otherwise main.
 6. The service cart is removed. Active trips are not resumed after a server
    restart; recovery reconciles them safely.
 
@@ -133,6 +136,7 @@ registered button.
 ```text
 /rail station create <id> <displayName...>
 /rail station exit <id>
+/rail station arrival set|remove <station> <from>
 /rail station rename <id> <displayName...>
 /rail station enable|disable <id>
 /rail station info <id>
@@ -194,7 +198,7 @@ is fixed and `/rail reload` or a restart succeeds. See
   scan clears the delay.
 - On restart, persisted checkpoint carts are reconciled by UUID and safely
   removed/stopped; trips never resume automatically.
-- State is stored in `<world>/railway/state.json` (schema 4). Migrations create a
+- State is stored in `<world>/railway/state.json` (schema 5). Migrations create a
   rolling `state.vN.bak` first.
 
 See [`docs/operations.md`](docs/operations.md).
@@ -208,7 +212,9 @@ See [`docs/operations.md`](docs/operations.md).
 - No true long-route-beyond-simulation-distance or mid-trip `kill -9` acceptance
   run has been completed with a real client. The code paths and local tests exist;
   see the Stage 5 report.
-- Arrival is station-main only. Per-origin arrival platforms are not implemented.
+- Per-origin arrival platforms are configured by command, not by a sign flag.
+  Sources without a platform, and platforms after removal, fall back to the
+  destination main dock/exit/yaw.
 - A destination unit has one route. To offer several routes from one station,
   build several destination pillars and walk between them.
 - Service signs require wall signs, stone buttons, and straight horizontal dock

@@ -1,11 +1,12 @@
 # Railway production TODO
 
-Last updated: 2026-11-01. Current alpha: `0.1.0-alpha.7`.
+Last updated: 2026-11-03. Current alpha: `0.1.0-alpha.7`.
 
 ## Verified
 
-- [x] Unit tests: 245 passing.
-- [x] GameTests: 64 passing.
+- [x] Unit tests: 258 passing.
+- [x] GameTests: 67 passing.
+- [x] Per-origin arrival platforms (`/rail station arrival set/remove`) with main-arrival fallback; schema 5 migration; GameTest coverage for two origins and fallback.
 - [x] Automatic startup scans, one scan per connected component.
 - [x] Scan frontier wider than 32 chunks is processed in bounded subsets.
 - [x] Long-route fixture: 513 rails, 512-block route both directions, destination unloaded before scan, scan auto-loads it, no recovery debris.
@@ -53,7 +54,7 @@ Last updated: 2026-11-01. Current alpha: `0.1.0-alpha.7`.
 ## Known limitations to keep in the project body
 
 - Server-side only; no client mod required.
-- Arrival is always the station main exit; per-origin arrival platforms are not implemented.
+- Per-origin arrival platforms are command-configured (`/rail station arrival set/remove`); there is no sign flag. Without a platform, arrivals use the destination main exit.
 - No queues, cargo, schedules, portals, custom rails, or GUI.
 - Vanilla chunk-ticket propagation can load an adjacent boundary chunk. Railway itself never requests new chunks or generates during a scan.
 - Compatibility is tested only on the pinned Minecraft/Fabric/Java versions and the listed server mod stack.

@@ -154,14 +154,23 @@ public record DiagnosticsReport(
 			boolean provisional,
 			BlockLocation dock,
 			BlockLocation exit,
+			List<ArrivalSummary> arrivals,
 			int units,
 			SignMarker mainMarker,
 			List<BindingSummary> bindings,
 			ScanSummary scan
 	) {
 		public StationSummary {
+			arrivals = List.copyOf(arrivals);
 			bindings = List.copyOf(bindings);
 		}
+	}
+
+	public record ArrivalSummary(
+			StationId source,
+			BlockLocation dock,
+			BlockLocation exit
+	) {
 	}
 
 	public record BindingSummary(
@@ -292,6 +301,10 @@ public record DiagnosticsReport(
 		add(lines, lang, "diagnostics.focus.header", station.id().value(), station.displayName(),
 				station.dimension(), station.provisional() ? "provisional" : station.dock().shortString());
 		add(lines, lang, "diagnostics.station.main", mainText(lang, station));
+		for (ArrivalSummary arrival : station.arrivals()) {
+			add(lines, lang, "diagnostics.station.arrival", arrival.source().value(),
+					arrival.dock().shortString(), arrival.exit().shortString());
+		}
 		if (station.bindings().isEmpty()) {
 			add(lines, lang, "diagnostics.station.no_bindings");
 		} else {

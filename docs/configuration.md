@@ -104,9 +104,10 @@ State lives at:
 <world>/railway/state.json
 ```
 
-Current schema: **4**. It includes:
+Current schema: **5**. It includes:
 
 - stations (main dock, exit, display name, enabled, revision);
+- per-origin arrival platforms (source station, dock, exit, yaw);
 - provisional destinations;
 - bindings, including local `sourceDock`;
 - sign markers, owning station, `m` main flag;

@@ -149,7 +149,8 @@ A destination unit with a button can never drop its line-3 destination.
 
 ## Main arrival
 
-Every station has one main dock/exit. Arrival always uses it.
+Every station has one main dock/exit. Arrival uses it unless a per-origin arrival
+platform applies (below).
 
 - The first anchor initializes main.
 - `m` on any unit moves main to that unit's local dock and selected exit.
@@ -170,6 +171,32 @@ Every station has one main dock/exit. Arrival always uses it.
 `m` is checked when the sign is saved. Moving main triggers a station rescan from
 the new dock and refreshes connected station graph revisions.
 
+## Arrival platforms
+
+A destination station can expose a separate arrival dock/exit/yaw per source
+station. This is **command-configured**; there is no sign flag or special pillar
+for it:
+
+```text
+/rail station arrival set <destination> <source>
+```
+
+Stand at the destination platform in the destination dimension and look at its
+straight horizontal rail within 5 blocks. The targeted rail becomes the arrival
+dock, the player's feet block becomes the exit, and the player's yaw is stored.
+The destination must be anchored with a main exit, and the source must be a
+different station in the same dimension. The exit must be within 4 horizontal and
+3 vertical blocks of the dock; the dock must be within 64 horizontal blocks of
+the destination main dock. Setting the same source again replaces its platform.
+
+`/rail station arrival remove <destination> <source>` deletes the platform.
+
+Trips (and `/rail route check`) from that source arrive at the registered dock and
+use its exit/yaw. Every other source, and every source after removal, falls back
+to the destination main dock/exit/yaw. Arrival platforms are plain storage: they
+do not add sign units, buttons, or chain rules, and they are not scanned
+separately. `/rail station info <destination>` lists one line per platform.
+
 ## Chaining and local docking
 
 - Each destination unit gets its own local dock. Pressing that unit's button
@@ -188,7 +215,7 @@ the new dock and refreshes connected station graph revisions.
   bindings do not have one and use the station main dock.
 
 This is what allows a wide station with several pillars: departure is local,
-arrival is at main.
+arrival is at main unless a command-configured per-origin platform applies.
 
 ## Break behavior
 
@@ -232,7 +259,8 @@ to an existing service sign is reverted.
 
 ## Migration from earlier sign versions
 
-State schema 4 loads older sign state and preserves station/main data. Legacy
+State schema 5 loads older sign state and preserves station/main data; schema 4
+and older migrate with empty per-origin arrival platforms. Legacy
 bindings have `sourceDock = null` and depart from the station main until the sign
 is saved once again. Legacy markers have `main = false`.
 
@@ -246,7 +274,6 @@ To upgrade a station:
 
 ## Not implemented
 
-- Per-origin arrival platforms; all arrivals use station main.
 - Multiple routes on one destination unit.
 - Automatic return-button placement.
 - Standing/hanging signs or non-stone buttons.

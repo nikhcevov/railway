@@ -5,6 +5,7 @@ import com.google.gson.GsonBuilder;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 
+import dev.nikhcevov.railway.domain.ArrivalPlatform;
 import dev.nikhcevov.railway.domain.Binding;
 import dev.nikhcevov.railway.domain.SignMarker;
 import dev.nikhcevov.railway.domain.Station;
@@ -26,9 +27,10 @@ public final class JsonStateStore implements StateStore {
 	/**
 	 * Schema 2 adds sign markers and dockless provisional stations. Schema 3 adds the
 	 * binding source dock and marker station/main ownership. Schema 4 adds the trip
-	 * checkpoint dimension and block position used by crash recovery.
+	 * checkpoint dimension and block position used by crash recovery. Schema 5 adds
+	 * per-origin arrival platforms to stations.
 	 */
-	public static final int SCHEMA_VERSION = 4;
+	public static final int SCHEMA_VERSION = 5;
 	private static final Gson GSON = new GsonBuilder().setPrettyPrinting().disableHtmlEscaping().create();
 
 	private final Path file;
@@ -69,6 +71,9 @@ public final class JsonStateStore implements StateStore {
 		}
 		if (schema < SCHEMA_VERSION) {
 			backup(schema);
+			if (schema < 5) {
+				stripArrivalPlatforms(object);
+			}
 		}
 
 		StateFile parsed;
@@ -98,6 +103,21 @@ public final class JsonStateStore implements StateStore {
 			Files.copy(file, backup, StandardCopyOption.REPLACE_EXISTING);
 		} catch (IOException e) {
 			throw new StateStore.StateException("cannot back up state before migration: " + e.getMessage(), e);
+		}
+	}
+
+	/**
+	 * Drops any arrival platform data found in a pre-schema-5 file: the migration treats
+	 * every station as having no per-origin platforms.
+	 */
+	private static void stripArrivalPlatforms(JsonObject object) {
+		if (!object.has("stations") || !object.get("stations").isJsonArray()) {
+			return;
+		}
+		for (var element : object.getAsJsonArray("stations")) {
+			if (element.isJsonObject()) {
+				element.getAsJsonObject().remove("arrivalPlatforms");
+			}
 		}
 	}
 
@@ -144,6 +164,7 @@ public final class JsonStateStore implements StateStore {
 				}
 			}
 		}
+		validateArrivalPlatforms(state, ids);
 		Set<String> buttons = new HashSet<>();
 		if (parsed.bindings != null) {
 			for (Binding rawBinding : parsed.bindings) {
@@ -260,6 +281,31 @@ public final class JsonStateStore implements StateStore {
 		state.setRevision(Math.max(parsed.revision, maxStationRevision));
 	}
 
+	private static void validateArrivalPlatforms(WorldState state, Set<StationId> stationIds)
+			throws StateStore.StateException {
+		for (Station station : state.stations()) {
+			Set<StationId> sources = new HashSet<>();
+			for (ArrivalPlatform platform : station.arrivalPlatforms()) {
+				if (platform == null || platform.source() == null || platform.dock() == null
+						|| platform.exit() == null) {
+					throw new StateStore.StateException("arrival platform has missing required fields");
+				}
+				if (platform.source().equals(station.id())) {
+					throw new StateStore.StateException(
+							"arrival platform source must differ from its station: " + station.id());
+				}
+				if (!sources.add(platform.source())) {
+					throw new StateStore.StateException(
+							"duplicate arrival platform source: " + platform.source());
+				}
+				if (!stationIds.contains(platform.source())) {
+					throw new StateStore.StateException(
+							"arrival platform references unknown station: " + platform.source());
+				}
+			}
+		}
+	}
+
 	private static Set<String> declaredStationNameKeys(StateFile parsed) {
 		Set<String> keys = new HashSet<>();
 		if (parsed.stations == null) {
@@ -304,7 +350,8 @@ public final class JsonStateStore implements StateStore {
 			String key = StationNames.lookupKey(station.dimension(), candidate);
 			if (!assigned.contains(key) && !declared.contains(key)) {
 				return new Station(station.id(), candidate, station.dimension(), station.dock(),
-						station.exit(), station.exitYaw(), station.enabled(), station.revision());
+						station.exit(), station.exitYaw(), station.enabled(), station.revision(),
+						station.arrivalPlatforms());
 			}
 		}
 	}

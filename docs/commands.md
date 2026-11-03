@@ -11,10 +11,11 @@ migration, diagnostics, and controlled stations.
 - Service-sign registration also accepts UUIDs listed in `builders`.
 - Read-only `station info`, `station list`, `button info`, and `network status`
   do not require OP.
-- Player-position commands (`station create`, `station exit`, `button ...`) need a
-  player source. Console receives a clear error.
-- Console can use `station info/list`, `network scan/status`, `route check`,
-  `trip list/abort`, `diagnostics`, and `reload`.
+- Player-position commands (`station create`, `station exit`, `station arrival set`,
+  `button ...`) need a player source. Console receives a clear error.
+- Console can use `station info/list`, `station arrival remove`,
+  `network scan/status`, `route check`, `trip list/abort`, `diagnostics`, and
+  `reload`.
 
 ## Identifiers
 
@@ -50,6 +51,32 @@ Sets the station exit at the administrator's current feet block and yaw. The blo
 must be a safe stand. For sign-created stations, this changes the **main** exit;
 it does not move the main dock or change `m`.
 
+### `/rail station arrival set <station> <from>`
+
+Registers a per-origin arrival platform on destination `<station>` for trips that
+start at `<from>`. Stand at the destination platform in the destination
+dimension, look at its straight horizontal rail within 5 blocks, then run the
+command: the targeted rail block becomes the arrival dock and your feet block
+becomes the exit (yaw is taken from your view). The destination must be anchored
+with a main exit; the source must exist, differ from the destination, and share
+its dimension. The exit must be within 4 horizontal and 3 vertical blocks of the
+dock, and the dock within 64 horizontal blocks of the destination main dock.
+Setting an existing source again replaces that platform.
+
+```text
+/rail station arrival set garden home
+```
+
+### `/rail station arrival remove <station> <from>`
+
+Removes the platform used by trips from `<from>` to `<station>`. It fails when no
+such platform exists. After removal, those trips fall back to the destination main
+dock/exit/yaw.
+
+```text
+/rail station arrival remove garden home
+```
+
 ### `/rail station rename <id> <displayName...>`
 
 Changes only the display name. A station with existing bindings cannot be renamed;
@@ -64,8 +91,9 @@ provisional station cannot be enabled.
 ### `/rail station info <id>`
 
 Shows ID/name, dimension, main dock/exit, enabled state, revision, number of sign
-units, main-arrival source (`m` marker or main fallback), bindings with source
-docks, scan status, graph metadata, and known problems.
+units, main-arrival source (`m` marker or main fallback), one line per
+per-origin arrival platform (source, dock, exit), bindings with source docks,
+scan status, graph metadata, and known problems.
 
 ### `/rail station list`
 
@@ -132,7 +160,10 @@ stations are not separate jobs).
 Plans a route without spawning a cart or acquiring reservations. Reports length,
 rail/switch count, component, and failure reason. Loaded route portions are
 validated; unloaded tails are deferred to the ticket window at actual travel time.
-A destination without an exit or an unanchored destination is rejected.
+A destination without an exit or an unanchored destination is rejected. When the
+destination has a per-origin arrival platform for the source, the check plans to
+that dock and validates that exit; otherwise it uses the destination main
+dock/exit.
 
 ### `/rail trip list`
 
@@ -212,6 +243,24 @@ The first route check also starts the missing scans automatically and may report
 `SCAN_RUNNING`; run it again when the scan completes. `/rail network scan home`
 remains available to force a rescan and wait for a job ID.
 
+### Per-origin arrival platform
+
+At the destination, build a separate arrival track and platform for one origin.
+Stand on the platform, look at its rail, and register it:
+
+```text
+/rail station arrival set mine home
+/rail station info mine
+/rail route check home mine
+```
+
+Trips from `home` now arrive at that dock/exit; trips from other stations still
+use the `mine` main arrival. Remove the platform to restore the main fallback:
+
+```text
+/rail station arrival remove mine home
+```
+
 ### Inspect a problem
 
 ```text
@@ -230,6 +279,7 @@ remains available to force a rescan and wait for a job ID.
 | `STATION_INCOMPLETE` | Set a safe exit and enable; provisional must be anchored by a sign |
 | `STATION_DISABLED` | Enable the station; abort active trips first |
 | `DESTINATION_NOT_ANCHORED` | Build/save the destination's return sign |
+| `ARRIVAL_PLATFORM` | Adjust the arrival platform: use a straight dock, a safe exit within 4/3 blocks, a dock within 64 blocks of main, and a distinct same-dimension source |
 | `SCAN_INCOMPLETE` / `SCAN_RUNNING` | Scans start automatically; wait and retry. Use `/rail network status <station>` to monitor, or `/rail network scan <station>` to force a rescan |
 | `SCAN_FAILED` / `NO_RAIL` / `UNSUPPORTED_*` | Inspect report and rail geometry |
 | `DOCK_NOT_ON_LINE` / `NO_PATH` | Dock/graph mismatch or disconnected network |

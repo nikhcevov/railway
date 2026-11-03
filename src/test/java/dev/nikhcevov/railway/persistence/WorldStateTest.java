@@ -1,5 +1,6 @@
 package dev.nikhcevov.railway.persistence;
 
+import dev.nikhcevov.railway.domain.ArrivalPlatform;
 import dev.nikhcevov.railway.domain.Binding;
 import dev.nikhcevov.railway.domain.BlockLocation;
 import dev.nikhcevov.railway.domain.SignMarker;
@@ -307,6 +308,37 @@ class WorldStateTest {
 		assertTrue(state.removeSignMarker(DIMENSION, sign).isPresent());
 		assertEquals(List.of(pending), state.pruneProvisionalStations());
 		assertTrue(state.station(pending.id()).isEmpty());
+	}
+
+	@Test
+	void removingAStationPrunesItsArrivalPlatformsFromOtherStations() {
+		WorldState state = new WorldState();
+		Station home = anchored("home", "Home", 1);
+		Station mine = anchored("mine", "Mine", 2);
+		Station depot = anchored("depot", "Depot", 3);
+		state.addStation(home);
+		state.addStation(mine);
+		state.addStation(depot);
+		ArrivalPlatform fromHome = new ArrivalPlatform(home.id(),
+				new BlockLocation(20, 64, 0), new BlockLocation(21, 64, 0), 45.0F);
+		ArrivalPlatform fromMine = new ArrivalPlatform(mine.id(),
+				new BlockLocation(30, 64, 0), new BlockLocation(31, 64, 0), 90.0F);
+		state.updateStation(mine.withArrivalPlatform(fromHome, 4));
+		state.updateStation(depot.withArrivalPlatform(fromHome, 5).withArrivalPlatform(fromMine, 6));
+		long revisionBefore = state.revision();
+
+		state.removeStation(home.id());
+
+		assertTrue(state.station(home.id()).isEmpty());
+		Station remainingMine = state.station(mine.id()).orElseThrow();
+		assertTrue(remainingMine.arrivalPlatforms().isEmpty(),
+				"a platform sourced from the removed station must be pruned");
+		assertEquals(4, remainingMine.revision(), "pruning must not change the station revision");
+		Station remainingDepot = state.station(depot.id()).orElseThrow();
+		assertEquals(List.of(fromMine), remainingDepot.arrivalPlatforms(),
+				"platforms from surviving sources are retained");
+		assertEquals(6, remainingDepot.revision());
+		assertEquals(revisionBefore + 1, state.revision(), "pruning shares the single removal bump");
 	}
 
 	@Test

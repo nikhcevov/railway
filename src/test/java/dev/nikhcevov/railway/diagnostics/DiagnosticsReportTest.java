@@ -1,6 +1,7 @@
 package dev.nikhcevov.railway.diagnostics;
 
 import dev.nikhcevov.railway.commands.Messages;
+import dev.nikhcevov.railway.diagnostics.DiagnosticsReport.ArrivalSummary;
 import dev.nikhcevov.railway.diagnostics.DiagnosticsReport.BindingSummary;
 import dev.nikhcevov.railway.diagnostics.DiagnosticsReport.GraphSummary;
 import dev.nikhcevov.railway.diagnostics.DiagnosticsReport.ScanSummary;
@@ -64,6 +65,8 @@ class DiagnosticsReportTest {
 
 		assertContains(lines, "Station detail alpha (Alpha) | minecraft:overworld | 1 64 2");
 		assertContains(lines, "  main: 1 64 5 (m flag)");
+		assertTrue(lines.stream().anyMatch(line -> line.endsWith("beta -> dock 1 64 3, exit 1 64 6")),
+				"missing arrival platform line\nactual:\n" + String.join("\n", lines));
 		assertContains(lines, "  bindings: alpha->beta @ 0 64 4 dock 1 64 2");
 		assertContains(lines, "  scan: Scan scan-1 @ alpha: complete, rails 10, switches 2, revision 9 "
 				+ "(covers beta)");
@@ -151,8 +154,8 @@ class DiagnosticsReportTest {
 	@Test
 	void rendersDockFallbackWhenAnchoredStationHasNoMainMarker() {
 		StationSummary gamma = new StationSummary(new StationId("gamma"), "Gamma",
-				"minecraft:overworld", true, 2, false, new BlockLocation(5, 64, 2), null, 0,
-				null, List.of(), null);
+				"minecraft:overworld", true, 2, false, new BlockLocation(5, 64, 2), null, List.of(),
+				0, null, List.of(), null);
 		DiagnosticsReport report = emptyReport(List.of(), List.of(gamma), Optional.of(gamma));
 
 		List<String> lines = report.render(Messages.Lang.EN);
@@ -179,12 +182,15 @@ class DiagnosticsReportTest {
 		ScanSummary scan = new ScanSummary("scan-1", ALPHA, 10, 2, false, null, 9,
 				new GraphSummary(9, "comp-1", 10, 2), null, List.of(BETA));
 		StationSummary alpha = new StationSummary(ALPHA, "Alpha", "minecraft:overworld", true,
-				3, false, new BlockLocation(1, 64, 2), new BlockLocation(1, 64, 4), 2, main,
+				3, false, new BlockLocation(1, 64, 2), new BlockLocation(1, 64, 4),
+				List.of(new ArrivalSummary(BETA, new BlockLocation(1, 64, 3),
+						new BlockLocation(1, 64, 6))),
+				2, main,
 				List.of(new BindingSummary(ALPHA, BETA, new BlockLocation(0, 64, 4),
 						new BlockLocation(1, 64, 2))),
 				scan);
 		StationSummary beta = new StationSummary(BETA, "Beta", "minecraft:overworld", false,
-				1, true, null, null, 1, null, List.of(), null);
+				1, true, null, null, List.of(), 1, null, List.of(), null);
 
 		return new DiagnosticsReport(
 				new DiagnosticsReport.Global(true, null, true, 7, 1,

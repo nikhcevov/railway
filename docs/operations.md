@@ -28,6 +28,7 @@ Per-station output adds:
 
 - display name, dimension, dock, exit, enabled, revision, provisional state;
 - sign-unit count and current main marker (or main fallback);
+- one line per per-origin arrival platform (source, dock, exit);
 - bindings and local source docks;
 - scan/graph status.
 
@@ -152,7 +153,7 @@ build.
 
 ## Restart and recovery
 
-State checkpoints are stored in world state schema 4 with:
+State checkpoints are stored in world state schema 5 with:
 
 - trip/player/cart UUIDs, from/to stations, phase, started tick;
 - dimension and last checkpointed cart position.
@@ -250,12 +251,13 @@ reached `Done` successfully.
 
 Verified:
 
-- 245 unit tests and 64 GameTests, including automatic startup/on-demand scans,
-  retry cooldown, and scan-ticket isolation from background jobs;
+- 258 unit tests and 67 GameTests, including automatic startup/on-demand scans,
+  retry cooldown, scan-ticket isolation from background jobs, and per-origin
+  arrival platforms;
 - live diagnostics;
 - live startup recovery with a tagged cart + checkpoint;
 - vanilla world load without Railway;
-- schema 4 migration and backup.
+- schema 5 migration and backup.
 
 Not fully proven:
 

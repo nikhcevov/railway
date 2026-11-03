@@ -1,5 +1,6 @@
 package dev.nikhcevov.railway.persistence;
 
+import dev.nikhcevov.railway.domain.ArrivalPlatform;
 import dev.nikhcevov.railway.domain.Binding;
 import dev.nikhcevov.railway.domain.BlockLocation;
 import dev.nikhcevov.railway.domain.SignMarker;
@@ -79,12 +80,14 @@ public final class WorldState {
 	}
 
 	/**
-	 * Removes a station, its bindings, and markers that reference it. Marker removal
-	 * covers units owned by the station, markers anchored by it, and markers whose button
-	 * binding was removed; other station data is never touched by marker lifecycle.
+	 * Removes a station, its bindings, markers that reference it, and arrival platforms
+	 * registered for it on other stations. Marker removal covers units owned by the
+	 * station, markers anchored by it, and markers whose button binding was removed;
+	 * other station data is never touched by marker lifecycle.
 	 */
 	public List<Binding> removeStation(StationId id) {
 		stations.remove(id);
+		pruneArrivalPlatforms(id);
 		revision++;
 		List<Binding> removed = new ArrayList<>();
 		bindings.entrySet().removeIf(entry -> {
@@ -108,6 +111,25 @@ public final class WorldState {
 					&& removedButtons.contains(bindingKey(marker.dimension(), marker.button()));
 		});
 		return removed;
+	}
+
+	/**
+	 * Drops every arrival platform registered for {@code source} from the remaining
+	 * stations without changing their revisions.
+	 */
+	private void pruneArrivalPlatforms(StationId source) {
+		for (Station station : List.copyOf(stations.values())) {
+			List<ArrivalPlatform> platforms = station.arrivalPlatforms();
+			List<ArrivalPlatform> kept = platforms.stream()
+					.filter(platform -> !platform.source().equals(source))
+					.toList();
+			if (kept.size() == platforms.size()) {
+				continue;
+			}
+			stations.put(station.id(), new Station(station.id(), station.displayName(),
+					station.dimension(), station.dock(), station.exit(), station.exitYaw(),
+					station.enabled(), station.revision(), kept));
+		}
 	}
 
 	/**

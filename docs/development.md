@@ -93,7 +93,7 @@ signs, and buttons; service carts are ordinary minecarts with Railway tags.
 ## State and config
 
 - `config/railway.json`: validated config; invalid files are never overwritten.
-- `<world>/railway/state.json`: schema 4; migrations create `state.vN.bak`.
+- `<world>/railway/state.json`: schema 5; migrations create `state.vN.bak`.
 - `/rail reload` affects new trips; active trips use their snapshot.
 - Schema changes require a migration test and backup behavior.
 
