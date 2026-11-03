@@ -294,7 +294,8 @@ use the `mine` main arrival. Remove the platform to restore the main fallback:
 
 ## Dev-only acceptance fixtures
 
-`/railfixture` is not a production command. In a Fabric development environment
-(or with `-Drailway.fixtures=true`) it builds and verifies real acceptance
-worlds for unloaded chunks, long routes, and `kill -9` recovery. See
-[`fixtures.md`](fixtures.md).
+`/railfixture` is not a production command. It is part of the development-only
+`src/dev` source set and is loaded by `./gradlew runServer` or
+`./gradlew runFixtureServer`; production jars contain no fixture classes. It
+builds and verifies real acceptance worlds for unloaded chunks, long routes, and
+`kill -9` recovery. See [`fixtures.md`](fixtures.md).

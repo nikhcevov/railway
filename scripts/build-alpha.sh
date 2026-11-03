@@ -36,6 +36,11 @@ if unzip -l "$JAR" | grep -qE '(^|/)(world|run|fixtures?)/'; then
 	exit 1
 fi
 
+if unzip -l "$JAR" | grep -q 'dev/nikhcevov/railway/fixture/'; then
+	echo "[alpha] jar contains dev-only fixture classes" >&2
+	exit 1
+fi
+
 mkdir -p dist
 cp "$JAR" "dist/railway-${VERSION}.jar"
 sha256sum "dist/railway-${VERSION}.jar" > "dist/railway-${VERSION}.jar.sha256"

@@ -21,9 +21,8 @@ import java.nio.file.Path;
 import java.util.List;
 
 /**
- * Dev-only {@code /railfixture} surface. It is registered by
- * {@code RailwayMod} only through {@link FixtureEnvironment}; a production jar
- * never exposes it.
+ * Dev-only {@code /railfixture} surface. It is registered by {@link FixtureMod}
+ * from the {@code src/dev} source set; production jars do not contain it.
  */
 public final class FixtureCommand {
 	private static final String WIDE_FRONTIER = "wide-frontier";

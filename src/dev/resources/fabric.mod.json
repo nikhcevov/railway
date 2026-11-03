@@ -1,0 +1,20 @@
+{
+	"schemaVersion": 1,
+	"id": "railway-fixtures",
+	"version": "1.0.0",
+	"name": "Railway Dev Fixtures",
+	"description": "Development-only acceptance fixture commands.",
+	"environment": "server",
+	"entrypoints": {
+		"main": [
+			"dev.nikhcevov.railway.fixture.FixtureMod"
+		]
+	},
+	"depends": {
+		"railway": "*",
+		"fabricloader": ">=0.20.1",
+		"minecraft": "~26.1.2",
+		"java": ">=25",
+		"fabric-api": "*"
+	}
+}

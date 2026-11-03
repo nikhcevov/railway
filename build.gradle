@@ -70,6 +70,28 @@ dependencies {
 	testRuntimeOnly "org.junit.platform:junit-platform-launcher"
 }
 
+// Dev-only acceptance fixtures. They compile against the production sources but
+// live outside `main`, so neither the jar nor the sources jar can contain them.
+sourceSets {
+	dev {
+		compileClasspath += sourceSets.main.output + sourceSets.main.compileClasspath
+		runtimeClasspath += sourceSets.main.output + sourceSets.main.runtimeClasspath
+	}
+}
+
+// Fixture unit tests stay in the normal test source set; give it the dev classes.
+sourceSets.test.compileClasspath += sourceSets.dev.output
+sourceSets.test.runtimeClasspath += sourceSets.dev.output
+
+// Only the dev server runs get the fixture mod; GameTests stay production-shaped.
+tasks.matching { it.name == 'runServer' || it.name == 'runFixtureServer' }.configureEach {
+	classpath += sourceSets.dev.output
+}
+
+tasks.matching { it.name == 'jar' || it.name == 'sourcesJar' }.configureEach {
+	exclude 'dev/nikhcevov/railway/fixture/**'
+}
+
 processResources {
 	def version = project.version
 	inputs.property 'version', version

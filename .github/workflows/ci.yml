@@ -29,6 +29,18 @@ jobs:
       - name: Fabric GameTests
         run: ./gradlew runGameTest --stacktrace
 
+      - name: Verify production jar excludes dev fixtures
+        shell: bash
+        run: |
+          set -euo pipefail
+          for jar in build/libs/railway-*.jar; do
+            [ -e "$jar" ] || { echo "no railway jar found" >&2; exit 1; }
+            if unzip -l "$jar" | grep -q 'dev/nikhcevov/railway/fixture/'; then
+              echo "dev fixture classes leaked into $jar" >&2
+              exit 1
+            fi
+          done
+
       - name: Upload jar
         uses: actions/upload-artifact@v4
         with:

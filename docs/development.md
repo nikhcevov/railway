@@ -60,7 +60,7 @@ and Clumps; verify behavior under any other combination.
 | `sign` | pure sign parsing, pillar/dock geometry, validation |
 | `commands` | Brigadier surface and message catalogs |
 | `diagnostics` | read-only operations report |
-| `fixture` | dev-only `/railfixture` generator, verifier, and reports |
+| `fixture` (dev source set) | dev-only `/railfixture` generator, verifier, and reports; excluded from production jars |
 | `mixin` | sign-save and managed-cart hooks |
 
 No custom blocks, items, or entities are registered. Stations are vanilla rails,

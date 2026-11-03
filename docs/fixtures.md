@@ -7,25 +7,21 @@ longer than the simulation distance, and a real `kill -9` mid-trip.
 This is a **development tool**, not a production command and not a replacement
 for unit tests or GameTests.
 
-## Gate and removal before release
+## Development-only packaging
 
-`FixtureEnvironment` enables the surface only when Fabric reports a development
-environment, or when the JVM runs with:
+The fixture sources live in `src/dev/java`, with a separate development mod
+descriptor at `src/dev/resources/fabric.mod.json` (mod id `railway-fixtures`).
+Gradle adds that source set only to the `runServer` and `runFixtureServer`
+classpaths. `RailwayMod` has no fixture reference; the fixture entrypoint is
+`FixtureMod` in the development source set.
 
-```bash
--Drailway.fixtures=true
-```
+The production `jar` and `sourcesJar` exclude
+`dev/nikhcevov/railway/fixture/`. CI and `scripts/build-alpha.sh` fail the build
+if that package appears in an artifact, so a release jar never registers
+`/railfixture`.
 
-`RailwayMod` registers the command and its tick driver inside that gate. A
-production jar never registers `/railfixture`. The intended release cleanup is:
-
-1. delete `src/main/java/dev/nikhcevov/railway/fixture/`;
-2. delete `src/test/java/dev/nikhcevov/railway/fixture/`;
-3. delete the single `FixtureEnvironment` block in `RailwayMod`;
-4. delete the `fixtureServer` run config, the build-info resource, `scripts/`,
-   and this page.
-
-The fixture reports are still written by the development command only.
+`FixtureEnvironment` still gates the surface inside development runs. The
+fixture reports are written by the development command only.
 
 ## Build and run
 
