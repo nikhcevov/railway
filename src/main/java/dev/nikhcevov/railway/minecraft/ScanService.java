@@ -6,6 +6,7 @@ import dev.nikhcevov.railway.domain.Failure;
 import dev.nikhcevov.railway.domain.FailureCode;
 import dev.nikhcevov.railway.domain.Station;
 import dev.nikhcevov.railway.domain.StationId;
+import dev.nikhcevov.railway.logging.EventLog;
 import dev.nikhcevov.railway.network.GraphRailView;
 import dev.nikhcevov.railway.network.GraphScanner;
 import dev.nikhcevov.railway.network.RailGraph;
@@ -85,6 +86,7 @@ public final class ScanService {
 		final int sharedTicketBudget;
 		final long startedTick;
 		final long revision;
+		final ScanTrigger trigger;
 		GraphScanner scanner;
 		RailGraph graph;
 		Failure failure;
@@ -93,7 +95,7 @@ public final class ScanService {
 
 		Job(String id, StationId station, ServerLevel level, ScanView view, int railsPerTick,
 				long budgetNanos, int ticketBudget, int sharedTicketBudget, long startedTick,
-				long revision) {
+				long revision, ScanTrigger trigger) {
 			this.id = id;
 			this.station = station;
 			this.level = level;
@@ -104,6 +106,7 @@ public final class ScanService {
 			this.sharedTicketBudget = sharedTicketBudget;
 			this.startedTick = startedTick;
 			this.revision = revision;
+			this.trigger = trigger;
 		}
 	}
 
@@ -160,7 +163,7 @@ public final class ScanService {
 					});
 				} catch (RuntimeException e) {
 					probes.remove(key);
-					logger.warn("Cannot schedule the scan chunk probe result: {}", e.getMessage());
+					EventLog.event("scan.probe.schedule_fail").cause(e).warn(logger);
 				}
 			});
 		}
@@ -178,21 +181,44 @@ public final class ScanService {
 	/** Stations that reuse another station's graph, mapped to the owning station. */
 	private final Map<StationId, Alias> aliases = new LinkedHashMap<>();
 	/** Startup stations waiting for their turn; removed once covered by a scan. */
-	private final Map<StationId, Station> startupPending = new LinkedHashMap<>();
+	private final Map<StationId, Station> queuedStations = new LinkedHashMap<>();
 	private final Logger logger;
 	private final ChunkTicketManager tickets;
 	private final StationSource stationSource;
 	private final ScanRetryCooldown retry = new ScanRetryCooldown();
-	private Config startupConfig = Config.defaults();
-	private long startupRevision;
-	private StationId startupActive;
-	private int startupStarted;
-	private int startupCompleted;
-	private int startupCovered;
-	private int startupFailed;
-	private int startupSkipped;
-	private boolean startupSummaryPending;
+	private Config queueConfig = Config.defaults();
+	private long queueRevision;
+	private StationId queueActive;
+	private int queueStarted;
+	private int queueCompleted;
+	private int queueCovered;
+	private int queueFailed;
+	private int queueSkipped;
+	private boolean queueSummaryPending;
+	private QueueKind queueKind = QueueKind.STARTUP;
 	private long nextJobId = 1;
+
+	/** Which batch owns the queued scans; drives trigger and log event names. */
+	private enum QueueKind {
+		STARTUP("scan.startup", ScanTrigger.STARTUP),
+		RESCAN("scan.rescan", ScanTrigger.RESCAN_ALL);
+
+		private final String eventPrefix;
+		private final ScanTrigger trigger;
+
+		QueueKind(String eventPrefix, ScanTrigger trigger) {
+			this.eventPrefix = eventPrefix;
+			this.trigger = trigger;
+		}
+
+		String event(String suffix) {
+			return eventPrefix + "." + suffix;
+		}
+
+		ScanTrigger trigger() {
+			return trigger;
+		}
+	}
 
 	public ScanService(Logger logger, ChunkTicketManager tickets, StationSource stationSource) {
 		this.logger = logger;
@@ -208,25 +234,29 @@ public final class ScanService {
 		}
 	}
 
-	public StartResult start(Station station, ServerLevel level, Config config, long tick, long revision) {
+	public StartResult start(Station station, ServerLevel level, Config config, long tick, long revision,
+			ScanTrigger trigger) {
 		if (station.isProvisional()) {
-			return new StartResult.Rejected(
-					Failure.detail(FailureCode.STATION_INCOMPLETE, station.displayName()));
+			Failure failure = Failure.detail(FailureCode.STATION_INCOMPLETE, station.displayName());
+			reject(station, tick, trigger, failure);
+			return new StartResult.Rejected(failure);
 		}
 		Job existing = jobs.get(station.id());
 		if (existing != null && !existing.scanner.isFinished()) {
-			return new StartResult.Rejected(Failure.detail(FailureCode.SCAN_RUNNING, station.displayName()));
+			Failure failure = Failure.detail(FailureCode.SCAN_RUNNING, station.displayName());
+			reject(station, tick, trigger, failure);
+			return new StartResult.Rejected(failure);
 		}
 		// A real scan always supersedes a shared alias: the station now owns a
 		// job, and until that job completes it must not report the old graph.
 		aliases.remove(station.id());
-		startupPending.remove(station.id());
+		queuedStations.remove(station.id());
 		String jobId = "scan-" + nextJobId++;
 		ScanView view = new ScanView(level, logger);
 		Job job = new Job(jobId, station.id(), level, view, config.scanRailsPerTick(),
 				Math.max(1, config.scanTimeBudgetMs()) * 1_000_000L,
 				Math.min(config.maxManagedChunkTickets(), MAX_SCAN_TICKETS),
-				Math.max(0, config.maxManagedChunkTickets()), tick, revision);
+				Math.max(0, config.maxManagedChunkTickets()), tick, revision, trigger);
 		job.scanner = new GraphScanner(
 				station.dimension(),
 				station.dock(),
@@ -236,9 +266,30 @@ public final class ScanService {
 		);
 		Job replaced = jobs.put(station.id(), job);
 		if (replaced != null) {
-			discard(replaced);
+			discard(replaced, "superseded");
 		}
+		EventLog.event("scan.start")
+				.tick(tick)
+				.scan(jobId)
+				.station(station.id(), station.displayName())
+				.revision(revision)
+				.trigger(trigger)
+				.field("dim", station.dimension())
+				.field("dock", station.dock())
+				.field("railsPerTick", config.scanRailsPerTick())
+				.field("timeBudgetMs", config.scanTimeBudgetMs())
+				.field("maxRails", config.maxRailsPerScan())
+				.info(logger);
 		return new StartResult.Started(jobId);
+	}
+
+	private void reject(Station station, long tick, ScanTrigger trigger, Failure failure) {
+		EventLog.event("scan.reject")
+				.tick(tick)
+				.station(station.id(), station.displayName())
+				.trigger(trigger)
+				.failure(failure)
+				.warn(logger);
 	}
 
 	/**
@@ -253,7 +304,8 @@ public final class ScanService {
 	 * @return {@link StartResult.Started} when a new scan was launched, otherwise
 	 *         the failure to report to the caller
 	 */
-	public StartResult autoStart(Station station, ServerLevel level, Config config, long tick, long revision) {
+	public StartResult autoStart(Station station, ServerLevel level, Config config, long tick, long revision,
+			ScanTrigger trigger) {
 		StationId id = station.id();
 		if (graph(id) != null) {
 			// A shared component graph already answers this station; never start
@@ -269,10 +321,9 @@ public final class ScanService {
 			return new StartResult.Rejected(previous != null ? previous
 					: Failure.detail(FailureCode.SCAN_INCOMPLETE, station.displayName()));
 		}
-		StartResult result = start(station, level, config, tick, revision);
+		StartResult result = start(station, level, config, tick, revision, trigger);
 		if (result instanceof StartResult.Started) {
 			retry.recordAttempt(id, tick);
-			logger.info("Started automatic scan for station {} at tick {}", id.value(), tick);
 		}
 		return result;
 	}
@@ -294,8 +345,37 @@ public final class ScanService {
 	 * skipped.
 	 */
 	public void queueStartup(Collection<Station> stations, Config config, MinecraftServer server, long revision) {
-		startupConfig = config;
-		startupRevision = revision;
+		queue(stations, config, server, revision, QueueKind.STARTUP);
+	}
+
+	/**
+	 * Drops every cached graph and queues a fresh scan for every anchored station.
+	 * The queue runs one scan at a time and skips stations already covered by an
+	 * earlier completed component in the same pass, so each connected component is
+	 * scanned once.
+	 *
+	 * @return number of queued stations, or {@code -1} when another queue is still
+	 *         running (startup or a previous rescan)
+	 */
+	public int rescanAll(Collection<Station> stations, Config config, MinecraftServer server, long revision) {
+		if (queueActive != null || queueSummaryPending || !queuedStations.isEmpty()) {
+			return -1;
+		}
+		invalidateAll();
+		return queue(stations, config, server, revision, QueueKind.RESCAN);
+	}
+
+	private int queue(Collection<Station> stations, Config config, MinecraftServer server, long revision,
+			QueueKind kind) {
+		queueKind = kind;
+		queueConfig = config;
+		queueRevision = revision;
+		queueSummaryPending = false;
+		queueStarted = 0;
+		queueCompleted = 0;
+		queueCovered = 0;
+		queueFailed = 0;
+		queueSkipped = 0;
 		int queued = 0;
 		for (Station station : stations) {
 			if (!station.isAnchored()) {
@@ -305,30 +385,44 @@ public final class ScanService {
 				continue;
 			}
 			if (RailWorld.level(server, station.dimension()) == null) {
-				logger.warn("Cannot auto-scan station {}: dimension {} is not loaded",
-						station.id().value(), station.dimension());
-				startupSkipped++;
+				EventLog.event("scan.skip")
+						.field("station", station.id().value())
+						.field("reason", "dimension_not_loaded")
+						.field("dim", station.dimension())
+						.warn(logger);
+				queueSkipped++;
 				continue;
 			}
-			startupPending.put(station.id(), station);
+			queuedStations.put(station.id(), station);
 			queued++;
 		}
 		if (queued > 0) {
-			startupSummaryPending = true;
-			logger.info("Startup scan queue: {} station(s); one scan per connected component", queued);
+			queueSummaryPending = true;
+			EventLog.event(kind.event("queue")).field("queued", queued).info(logger);
 		}
-		pumpStartup(server, server.getTickCount());
+		pumpQueue(server, server.getTickCount());
+		return queued;
 	}
 
-	private void pumpStartup(MinecraftServer server, long tick) {
-		if (startupActive != null) {
-			Job active = jobs.get(startupActive);
+	/** Drops every cached graph so a queued rescan cannot reuse stale topology. */
+	private void invalidateAll() {
+		for (StationId owner : List.copyOf(jobs.keySet())) {
+			invalidateShared(owner, "rescan_all", null);
+		}
+		aliases.clear();
+		queuedStations.clear();
+		queueActive = null;
+	}
+
+	private void pumpQueue(MinecraftServer server, long tick) {
+		if (queueActive != null) {
+			Job active = jobs.get(queueActive);
 			if (active != null && !active.scanner.isFinished()) {
 				return;
 			}
-			startupActive = null;
+			queueActive = null;
 		}
-		Iterator<Station> iterator = startupPending.values().iterator();
+		Iterator<Station> iterator = queuedStations.values().iterator();
 		while (iterator.hasNext()) {
 			Station station = iterator.next();
 			iterator.remove();
@@ -342,39 +436,51 @@ public final class ScanService {
 			}
 			ServerLevel level = RailWorld.level(server, station.dimension());
 			if (level == null) {
-				logger.warn("Cannot auto-scan station {}: dimension {} is not loaded",
-						station.id().value(), station.dimension());
-				startupSkipped++;
+				EventLog.event("scan.skip")
+						.field("station", station.id().value())
+						.field("reason", "dimension_not_loaded")
+						.field("dim", station.dimension())
+						.warn(logger);
+				queueSkipped++;
 				continue;
 			}
-			StartResult result = autoStart(station, level, startupConfig, tick, startupRevision);
+			StartResult result = queueKind == QueueKind.STARTUP
+					? autoStart(station, level, queueConfig, tick, queueRevision, queueKind.trigger())
+					: start(station, level, queueConfig, tick, queueRevision, queueKind.trigger());
 			if (result instanceof StartResult.Started) {
-				startupActive = station.id();
-				startupStarted++;
+				queueActive = station.id();
+				queueStarted++;
 				return;
 			}
 			if (result instanceof StartResult.Rejected rejected) {
-				logger.warn("Automatic startup scan for station {} did not start: {} {}",
-						station.id().value(), rejected.failure().code(), rejected.failure().detail());
-				startupSkipped++;
+				EventLog.event(queueKind.event("reject"))
+						.station(station.id(), station.displayName())
+						.failure(rejected.failure())
+						.warn(logger);
+				queueSkipped++;
 			}
 		}
-		finishStartupSummary();
+		finishQueueSummary();
 	}
 
-	private void finishStartupSummary() {
-		if (!startupSummaryPending || startupActive != null) {
+	private void finishQueueSummary() {
+		if (!queueSummaryPending || queueActive != null) {
 			return;
 		}
-		logger.info("Startup scans finished: {} started, {} completed, {} station(s) covered by shared "
-						+ "components, {} failed, {} skipped",
-				startupStarted, startupCompleted, startupCovered, startupFailed, startupSkipped);
-		startupSummaryPending = false;
-		startupStarted = 0;
-		startupCompleted = 0;
-		startupCovered = 0;
-		startupFailed = 0;
-		startupSkipped = 0;
+		EventLog.event(queueKind.event("done"))
+				.field("started", queueStarted)
+				.field("completed", queueCompleted)
+				.field("covered", queueCovered)
+				.field("failed", queueFailed)
+				.field("skipped", queueSkipped)
+				.info(logger);
+		queueSummaryPending = false;
+		queueKind = QueueKind.STARTUP;
+		queueStarted = 0;
+		queueCompleted = 0;
+		queueCovered = 0;
+		queueFailed = 0;
+		queueSkipped = 0;
 	}
 
 	public void tick(MinecraftServer server) {
@@ -392,7 +498,7 @@ public final class ScanService {
 				complete(job, tick);
 			}
 		}
-		pumpStartup(server, tick);
+		pumpQueue(server, tick);
 	}
 
 	/**
@@ -470,14 +576,30 @@ public final class ScanService {
 			return;
 		}
 		job.budgetBlocked = true;
-		logger.warn("Scan {} for station {} cannot ticket its chunk frontier: {}",
-				job.id, job.station, detail);
+		EventLog.event("scan.budget_blocked")
+				.scan(job.id)
+				.station(job.station, stationName(job.station))
+				.field("detail", detail)
+				.warn(logger);
+	}
+
+	private String stationName(StationId id) {
+		for (Station station : stationSource.stations()) {
+			if (station.id().equals(id)) {
+				return station.displayName();
+			}
+		}
+		return null;
+	}
+
+	private static String dimension(Job job) {
+		return RailWorld.dimension(job.level);
 	}
 
 	private void complete(Job job, long tick) {
 		tickets.releaseScan(job.id);
 		job.view.close();
-		boolean startupJob = job.station.equals(startupActive);
+		boolean startupJob = job.station.equals(queueActive);
 		if (job.scanner.isFailed()) {
 			job.failure = job.scanner.failure();
 			// A failed component must not leave stations aliased to a graph that
@@ -486,29 +608,45 @@ public final class ScanService {
 			// Keep a failed geometry scan from being restarted by every button
 			// press; a manual `/rail network scan` still bypasses the cooldown.
 			retry.recordFailure(job.station, tick);
-			logger.warn("Scan {} for station {} failed: {} at {}{}", job.id, job.station,
-					job.failure.code(), job.failure.location() == null ? "-" : job.failure.location().shortString(),
-					job.failure.detail() == null ? "" : ": " + job.failure.detail());
+			EventLog.event("scan.fail")
+					.tick(tick)
+					.scan(job.id)
+					.station(job.station, stationName(job.station))
+					.trigger(job.trigger)
+					.revision(job.revision)
+					.field("dim", dimension(job))
+					.field("rails", job.scanner.railCount())
+					.field("elapsedTicks", tick - job.startedTick)
+					.failure(job.failure)
+					.warn(logger);
 			if (startupJob) {
-				startupFailed++;
-				startupActive = null;
+				queueFailed++;
+				queueActive = null;
 			}
 		} else {
 			job.graph = job.scanner.graph();
 			retry.clear(job.station);
-			int pendingBefore = startupPending.size();
+			int pendingBefore = queuedStations.size();
 			int newlyCovered = coverStations(job);
-			int pendingCovered = pendingBefore - startupPending.size();
-			if (pendingCovered > 0 && startupSummaryPending) {
-				startupCovered += pendingCovered;
+			int pendingCovered = pendingBefore - queuedStations.size();
+			if (pendingCovered > 0 && queueSummaryPending) {
+				queueCovered += pendingCovered;
 			}
-			logger.info("Scan {} for station {} complete: {} rails, {} switches{}",
-					job.id, job.station, job.graph.rails().size(), job.graph.switches().size(),
-					newlyCovered == 0 ? "" : "; covers " + newlyCovered
-							+ " station(s) on the same component");
+			EventLog.event("scan.complete")
+					.tick(tick)
+					.scan(job.id)
+					.station(job.station, stationName(job.station))
+					.trigger(job.trigger)
+					.revision(job.revision)
+					.field("dim", dimension(job))
+					.field("rails", job.scanner.railCount())
+					.field("switches", job.graph.switches().size())
+					.field("elapsedTicks", tick - job.startedTick)
+					.field("covered", newlyCovered)
+					.info(logger);
 			if (startupJob) {
-				startupCompleted++;
-				startupActive = null;
+				queueCompleted++;
+				queueActive = null;
 			}
 		}
 	}
@@ -532,7 +670,7 @@ public final class ScanService {
 				candidates.put(station.id(), station);
 			}
 		}
-		for (Station station : startupPending.values()) {
+		for (Station station : queuedStations.values()) {
 			if (station.isAnchored() && station.dimension().equals(graph.dimension())) {
 				candidates.put(station.id(), station);
 			}
@@ -568,7 +706,7 @@ public final class ScanService {
 				retry.clear(id);
 			}
 			Alias previous = aliases.put(id, new Alias(job.station, station));
-			startupPending.remove(id);
+			queuedStations.remove(id);
 			if (previous == null || !previous.owner().equals(job.station)) {
 				newlyCovered++;
 			}
@@ -580,9 +718,16 @@ public final class ScanService {
 		aliases.entrySet().removeIf(entry -> entry.getValue().owner().equals(owner));
 	}
 
-	private void discard(Job job) {
+	private void discard(Job job, String reason) {
 		tickets.releaseScan(job.id);
 		job.view.close();
+		EventLog.event("scan.discard")
+				.scan(job.id)
+				.field("station", job.station.value())
+				.trigger(job.trigger)
+				.field("reason", reason)
+				.field("rails", job.scanner.railCount())
+				.info(logger);
 	}
 
 	public Optional<Status> status(StationId station) {
@@ -703,26 +848,38 @@ public final class ScanService {
 		if (alias != null) {
 			Job own = jobs.remove(station);
 			if (own != null) {
-				discard(own);
+				discard(own, "invalidated");
+				logInvalidated(station, own, "station", null);
 			}
 			retry.clear(station);
-			invalidateShared(alias.owner());
+			invalidateShared(alias.owner(), "station", null);
 			return;
 		}
-		invalidateShared(station);
+		invalidateShared(station, "station", null);
 	}
 
-	private void invalidateShared(StationId owner) {
+	private void invalidateShared(StationId owner, String cause, BlockLocation pos) {
 		Job job = jobs.remove(owner);
 		if (job != null) {
-			discard(job);
+			discard(job, "invalidated");
+			logInvalidated(owner, job, cause, pos);
 		}
 		retry.clear(owner);
 		removeAliasesOwnedBy(owner);
-		startupPending.remove(owner);
-		if (owner.equals(startupActive)) {
-			startupActive = null;
+		queuedStations.remove(owner);
+		if (owner.equals(queueActive)) {
+			queueActive = null;
 		}
+	}
+
+	private void logInvalidated(StationId station, Job job, String cause, BlockLocation pos) {
+		EventLog.event("graph.invalidate")
+				.field("station", station.value())
+				.revision(job.revision)
+				.field("rails", job.scanner.railCount())
+				.field("cause", cause)
+				.field("pos", pos)
+				.info(logger);
 	}
 
 	public void invalidate(BlockLocation location) {
@@ -733,7 +890,7 @@ public final class ScanService {
 			}
 		}
 		for (StationId owner : affected) {
-			invalidateShared(owner);
+			invalidateShared(owner, "block_break", location);
 		}
 	}
 
@@ -754,7 +911,7 @@ public final class ScanService {
 			}
 		}
 		for (StationId owner : affected) {
-			invalidateShared(owner);
+			invalidateShared(owner, "adjacent", location);
 		}
 	}
 
@@ -776,18 +933,18 @@ public final class ScanService {
 
 	public void clear() {
 		for (Job job : jobs.values()) {
-			discard(job);
+			discard(job, "shutdown");
 		}
 		jobs.clear();
 		aliases.clear();
-		startupPending.clear();
-		startupActive = null;
-		startupSummaryPending = false;
-		startupStarted = 0;
-		startupCompleted = 0;
-		startupCovered = 0;
-		startupFailed = 0;
-		startupSkipped = 0;
+		queuedStations.clear();
+		queueActive = null;
+		queueSummaryPending = false;
+		queueStarted = 0;
+		queueCompleted = 0;
+		queueCovered = 0;
+		queueFailed = 0;
+		queueSkipped = 0;
 		retry.clear();
 	}
 }

@@ -10,6 +10,7 @@ import dev.nikhcevov.railway.minecraft.PlayerActions;
 import dev.nikhcevov.railway.minecraft.RailWorld;
 import dev.nikhcevov.railway.minecraft.Railway;
 import dev.nikhcevov.railway.minecraft.ScanService;
+import dev.nikhcevov.railway.minecraft.ScanTrigger;
 import dev.nikhcevov.railway.minecraft.TripService;
 import dev.nikhcevov.railway.network.RailGraph;
 
@@ -342,7 +343,7 @@ public final class RailwayGameTests extends GameTestSupport {
 			String ownerJob = mineStatus.jobId();
 			ScanService.StartResult result = scans.start(fixture.mine(), fixture.level(),
 					fixture.railway().config(), fixture.railway().server().getTickCount(),
-					fixture.railway().state().revision());
+					fixture.railway().state().revision(), ScanTrigger.COMMAND);
 			if (!(result instanceof ScanService.StartResult.Started)) {
 				throw helper.assertionException("manual scan of a covered station was rejected: " + result);
 			}

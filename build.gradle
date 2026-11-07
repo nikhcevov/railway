@@ -129,10 +129,12 @@ fabricApi {
 // reused run directory would make the next run start with every old test
 // station, so each GameTest run starts from a fresh Railway state.
 tasks.named('runGameTest') {
-	def stateFile = layout.buildDirectory.file('run/gameTest/world/railway/state.json').get().asFile
+	def railwayDir = layout.buildDirectory.dir('run/gameTest/world/railway').get().asFile
 	doFirst {
-		if (stateFile.isFile()) {
-			stateFile.delete()
+		railwayDir.listFiles()?.each { file ->
+			if (file.name == 'state.json' || file.name.startsWith('failures.jsonl')) {
+				file.delete()
+			}
 		}
 	}
 }

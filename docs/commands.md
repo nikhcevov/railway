@@ -145,6 +145,24 @@ being rejected. With `maxManagedChunkTickets: 0`, or when the frontier's chunks
 are missing or the shared ticket budget stays fully used by trips and other
 scans, the job fails with `CHUNKS_NOT_READY` instead of loading a partial graph.
 
+### `/rail network rescan`
+
+Drops every cached graph and queues a fresh scan for all anchored stations in
+loaded dimensions. The queue runs one scan at a time and skips stations already
+covered by a completed component in the same pass, so every connected component
+is re-analyzed exactly once. Reports the queued station count; rejects with a
+"scan queue already running" message while a startup or previous rescan queue is
+still in progress. Use it after bulk rail edits, after importing a world, or when
+you want proof that the current topology is fully re-read without restarting the
+server.
+
+Graphs are derived caches and are never persisted: a server restart already
+performs this full re-analysis automatically (one scan per component, in the
+background). A mod version change does not require a separate rescan for graph
+reasons; the startup pass already uses the new code, and persisted state is
+handled by the schema migration. `/rail network rescan` is for refreshing the
+running server on demand.
+
 ### `/rail network status [station]`
 
 Shows scan jobs, completion/failure, rail/switch counts, graph revision, and
@@ -195,6 +213,22 @@ Read-only operations snapshot. Global output includes:
 With a station, the focused entry also shows dock/exit, units, main marker,
 bindings with source docks, scan status, and graph metadata. Provisional stations
 show as not anchored. Output is line-based and unpaginated.
+
+### `/rail diagnostics failures [count]`
+
+Prints the most recent WARN/ERROR events recorded by the failure journal
+(newest first, default 10, maximum 50). Every player-facing failure shows a
+`[ref XXXXXXXX]` suffix; use that ref to fetch the matching record:
+
+```text
+/rail diagnostics failures
+/rail diagnostics failures 25
+/rail diagnostics ref 7d341c4c
+```
+
+The journal is appended to `<world>/railway/failures.jsonl` and rotates at 1 MiB
+(`failures.jsonl.1`, `.2`). It never blocks gameplay: if the file cannot be
+written, the in-memory ring still serves the last 256 events.
 
 ## Configuration
 

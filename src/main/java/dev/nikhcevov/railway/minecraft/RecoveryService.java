@@ -2,6 +2,7 @@ package dev.nikhcevov.railway.minecraft;
 
 import dev.nikhcevov.railway.dispatch.ChunkWindow;
 import dev.nikhcevov.railway.domain.TripId;
+import dev.nikhcevov.railway.logging.EventLog;
 import dev.nikhcevov.railway.persistence.TripRecord;
 import dev.nikhcevov.railway.recovery.RecoveryPolicy;
 
@@ -386,7 +387,7 @@ public final class RecoveryService {
 				});
 			} catch (RuntimeException e) {
 				entry.probeInFlight = false;
-				logger.warn("Cannot schedule the recovery chunk probe result: {}", e.getMessage());
+				EventLog.event("recovery.probe.schedule_fail").cause(e).warn(logger);
 			}
 		});
 	}

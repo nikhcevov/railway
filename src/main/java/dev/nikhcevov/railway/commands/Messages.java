@@ -8,6 +8,8 @@ import dev.nikhcevov.railway.domain.StationId;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -28,6 +30,8 @@ public final class Messages {
 		EN,
 		RU
 	}
+
+	private static final Logger LOGGER = LoggerFactory.getLogger("railway");
 
 	private static final Gson GSON = new Gson();
 	private static final Map<String, String> EN = load("en_us");
@@ -100,11 +104,16 @@ public final class Messages {
 	}
 
 	public static Component failure(CommandSourceStack source, Failure failure) {
-		return Component.literal(failureText(lang(source), failure));
+		return Component.literal(failureText(lang(source), failure) + refSuffix(failure));
 	}
 
 	public static Component failure(ServerPlayer player, Failure failure) {
-		return Component.literal(failureText(lang(player), failure));
+		return Component.literal(failureText(lang(player), failure) + refSuffix(failure));
+	}
+
+	/** Appends the support reference that matches the log line and journal entry. */
+	private static String refSuffix(Failure failure) {
+		return " [ref " + failure.ref() + "]";
 	}
 
 	public static String failureText(Lang lang, Failure failure) {
@@ -164,6 +173,7 @@ public final class Messages {
 		String path = "/assets/railway/lang/" + code + ".json";
 		try (InputStream stream = Messages.class.getResourceAsStream(path)) {
 			if (stream == null) {
+				LOGGER.error("event=message.catalog.missing path={}", path);
 				return Map.of();
 			}
 			try (Reader reader = new InputStreamReader(stream, StandardCharsets.UTF_8)) {
@@ -172,6 +182,7 @@ public final class Messages {
 				return parsed == null ? Map.of() : Map.copyOf(parsed);
 			}
 		} catch (IOException e) {
+			LOGGER.error("event=message.catalog.fail path={} detail={}", path, e.getMessage(), e);
 			return Map.of();
 		}
 	}

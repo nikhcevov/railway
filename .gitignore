@@ -36,3 +36,6 @@ replay_*.log
 # python
 __pycache__/
 *.pyc
+
+# local server/test run output
+/logs/

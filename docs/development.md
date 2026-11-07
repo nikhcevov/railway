@@ -153,6 +153,39 @@ deleted before a release. See [`fixtures.md`](fixtures.md).
    state transitions.
 5. Update `docs/commands.md` and the README command summary.
 
+## Logging
+
+Failures and lifecycle decisions must be recoverable from the server log alone.
+Use `dev.nikhcevov.railway.logging.EventLog` instead of ad-hoc logger strings:
+
+```java
+EventLog.event("scan.fail").tick(tick).scan(jobId)
+        .station(station.id(), station.displayName())
+        .trigger(trigger).failure(failure)
+        .warn(logger);
+```
+
+Rules:
+
+1. `EventLog` always emits `event=` first, then stable `key=value` fields. Values
+   are quoted and escaped, and details are truncated, so one event is one line.
+2. Every failure goes through `Failure` and includes a non-empty `detail`.
+   Use `Failure.fromThrowable(code, exception)` so an exception without a
+   message still names its type; the exception is logged once with its stack.
+3. Do not log support-relevant information at `DEBUG`; production runs at
+   `INFO`. Use `INFO` for lifecycle events and `WARN`/`ERROR` for failures.
+   Per-tick or per-rail logging is forbidden.
+4. Include the server tick and the identifiers that exist for the event
+   (`scan`, `trip`, `station`, `player`, `ref`), so unrelated lines from the same
+   moment can be correlated.
+5. Do not log the same failure twice: the event that reports the failure logs
+   the detail and stack, and callers log only their own rejection context.
+
+`/rail diagnostics` remains the live-state snapshot; the log is the historical
+record. Every `WARN`/`ERROR` line is also written to
+`<world>/railway/failures.jsonl` by `FailureJournal`; the `ref` in a logged
+`Failure` is stable and is appended to the player-facing message.
+
 ## Adding persistent state
 
 1. Bump `JsonStateStore.SCHEMA_VERSION`.

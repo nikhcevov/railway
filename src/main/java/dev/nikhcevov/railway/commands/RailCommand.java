@@ -1,6 +1,8 @@
 package dev.nikhcevov.railway.commands;
 
+import com.mojang.brigadier.Command;
 import com.mojang.brigadier.CommandDispatcher;
+import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.context.CommandContext;
 import com.mojang.brigadier.suggestion.SuggestionProvider;
@@ -16,10 +18,13 @@ import dev.nikhcevov.railway.domain.StationId;
 import dev.nikhcevov.railway.domain.StationNames;
 import dev.nikhcevov.railway.domain.Trip;
 import dev.nikhcevov.railway.domain.TripId;
+import dev.nikhcevov.railway.logging.EventLog;
+import dev.nikhcevov.railway.logging.FailureJournal;
 import dev.nikhcevov.railway.minecraft.PlayerActions;
 import dev.nikhcevov.railway.minecraft.RailWorld;
 import dev.nikhcevov.railway.minecraft.Railway;
 import dev.nikhcevov.railway.minecraft.ScanService;
+import dev.nikhcevov.railway.minecraft.ScanTrigger;
 import dev.nikhcevov.railway.minecraft.TripService;
 import dev.nikhcevov.railway.network.RailKind;
 import dev.nikhcevov.railway.network.GraphRailView;
@@ -34,14 +39,19 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.permissions.Permissions;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.util.Collection;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
+import java.util.UUID;
 import java.util.function.Predicate;
 
 /** Public {@code /rail} command surface for stage 1. */
 public final class RailCommand {
+	private static final Logger LOGGER = LoggerFactory.getLogger("railway");
 	private static final double TARGET_RANGE = 5.0;
 	private static final double ARRIVAL_EXIT_HORIZONTAL = 4.0;
 	private static final int ARRIVAL_EXIT_VERTICAL = 3;
@@ -72,71 +82,85 @@ public final class RailCommand {
 
 	public static void register(CommandDispatcher<CommandSourceStack> dispatcher) {
 		dispatcher.register(Commands.literal("rail")
-				.then(Commands.literal("help").executes(RailCommand::help))
+				.then(Commands.literal("help").executes(logged("help", RailCommand::help)))
 				.then(Commands.literal("station")
 						.then(Commands.literal("create").requires(OP2)
 								.then(Commands.argument("id", StringArgumentType.word())
 										.then(Commands.argument("displayName", StringArgumentType.greedyString())
-												.executes(RailCommand::stationCreate))))
+												.executes(logged("station.create", RailCommand::stationCreate)))))
 						.then(Commands.literal("exit").requires(OP2)
 								.then(Commands.argument("id", StringArgumentType.word()).suggests(STATIONS)
-										.executes(RailCommand::stationExit)))
+										.executes(logged("station.exit", RailCommand::stationExit))))
 						.then(Commands.literal("arrival").requires(OP2)
 								.then(Commands.literal("set")
 										.then(Commands.argument("station", StringArgumentType.word()).suggests(STATIONS)
 												.then(Commands.argument("from", StringArgumentType.word()).suggests(STATIONS)
-														.executes(RailCommand::arrivalSet))))
+														.executes(logged("station.arrival.set",
+																RailCommand::arrivalSet)))))
 								.then(Commands.literal("remove")
 										.then(Commands.argument("station", StringArgumentType.word()).suggests(STATIONS)
 												.then(Commands.argument("from", StringArgumentType.word()).suggests(STATIONS)
-														.executes(RailCommand::arrivalRemove)))))
+														.executes(logged("station.arrival.remove",
+																RailCommand::arrivalRemove))))))
 						.then(Commands.literal("rename").requires(OP2)
 								.then(Commands.argument("id", StringArgumentType.word()).suggests(STATIONS)
 										.then(Commands.argument("displayName", StringArgumentType.greedyString())
-												.executes(RailCommand::stationRename))))
+												.executes(logged("station.rename", RailCommand::stationRename)))))
 						.then(Commands.literal("enable").requires(OP2)
 								.then(Commands.argument("id", StringArgumentType.word()).suggests(STATIONS)
-										.executes(RailCommand::stationEnable)))
+										.executes(logged("station.enable", RailCommand::stationEnable))))
 						.then(Commands.literal("disable").requires(OP2)
 								.then(Commands.argument("id", StringArgumentType.word()).suggests(STATIONS)
-										.executes(RailCommand::stationDisable)))
+										.executes(logged("station.disable", RailCommand::stationDisable))))
 						.then(Commands.literal("info")
 								.then(Commands.argument("id", StringArgumentType.word()).suggests(STATIONS)
-										.executes(RailCommand::stationInfo)))
-						.then(Commands.literal("list").executes(RailCommand::stationList))
+										.executes(logged("station.info", RailCommand::stationInfo))))
+						.then(Commands.literal("list").executes(logged("station.list", RailCommand::stationList)))
 						.then(Commands.literal("remove").requires(OP2)
 								.then(Commands.argument("id", StringArgumentType.word()).suggests(STATIONS)
-										.executes(RailCommand::stationRemove))))
+										.executes(logged("station.remove", RailCommand::stationRemove)))))
 				.then(Commands.literal("button")
 						.then(Commands.literal("bind").requires(OP2)
 								.then(Commands.argument("from", StringArgumentType.word()).suggests(STATIONS)
 										.then(Commands.argument("to", StringArgumentType.word()).suggests(STATIONS)
-												.executes(RailCommand::buttonBind))))
-						.then(Commands.literal("info").executes(RailCommand::buttonInfo))
-						.then(Commands.literal("unbind").requires(OP2).executes(RailCommand::buttonUnbind)))
+												.executes(logged("button.bind", RailCommand::buttonBind)))))
+						.then(Commands.literal("info").executes(logged("button.info", RailCommand::buttonInfo)))
+						.then(Commands.literal("unbind").requires(OP2)
+								.executes(logged("button.unbind", RailCommand::buttonUnbind))))
 				.then(Commands.literal("network")
 						.then(Commands.literal("scan").requires(OP2)
 								.then(Commands.argument("station", StringArgumentType.word()).suggests(STATIONS)
-										.executes(RailCommand::networkScan)))
+										.executes(logged("network.scan", RailCommand::networkScan))))
+						.then(Commands.literal("rescan").requires(OP2)
+								.executes(logged("network.rescan", RailCommand::networkRescan)))
 						.then(Commands.literal("status")
-								.executes(RailCommand::networkStatusAll)
+								.executes(logged("network.status", RailCommand::networkStatusAll))
 								.then(Commands.argument("station", StringArgumentType.word()).suggests(STATIONS)
-										.executes(RailCommand::networkStatus))))
+										.executes(logged("network.status.station", RailCommand::networkStatus)))))
 				.then(Commands.literal("route")
 						.then(Commands.literal("check")
 								.then(Commands.argument("from", StringArgumentType.word()).suggests(STATIONS)
 										.then(Commands.argument("to", StringArgumentType.word()).suggests(STATIONS)
-												.executes(RailCommand::routeCheck)))))
+												.executes(logged("route.check", RailCommand::routeCheck))))))
 				.then(Commands.literal("trip")
-						.then(Commands.literal("list").executes(RailCommand::tripList))
+						.then(Commands.literal("list").executes(logged("trip.list", RailCommand::tripList)))
 						.then(Commands.literal("abort").requires(OP2)
 								.then(Commands.argument("tripId", StringArgumentType.word()).suggests(TRIPS)
-										.executes(RailCommand::tripAbort))))
+										.executes(logged("trip.abort", RailCommand::tripAbort)))))
 				.then(Commands.literal("diagnostics").requires(OP2)
-						.executes(RailCommand::diagnostics)
+						.executes(logged("diagnostics", RailCommand::diagnostics))
+						.then(Commands.literal("failures")
+								.executes(logged("diagnostics.failures", RailCommand::diagnosticsFailures))
+								.then(Commands.argument("count", IntegerArgumentType.integer(1, 50))
+										.executes(logged("diagnostics.failures.count",
+												RailCommand::diagnosticsFailures))))
+						.then(Commands.literal("ref")
+								.then(Commands.argument("ref", StringArgumentType.word())
+										.executes(logged("diagnostics.ref", RailCommand::diagnosticsRef))))
 						.then(Commands.argument("station", StringArgumentType.word()).suggests(STATIONS)
-								.executes(RailCommand::diagnosticsStation)))
-				.then(Commands.literal("reload").requires(OP2).executes(RailCommand::reload)));
+								.executes(logged("diagnostics.station", RailCommand::diagnosticsStation))))
+				.then(Commands.literal("reload").requires(OP2)
+						.executes(logged("reload", RailCommand::reload))));
 	}
 
 	// ------------------------------------------------------------------- help
@@ -606,12 +630,30 @@ public final class RailCommand {
 			return fail(context.getSource(), Failure.detail(FailureCode.WORLD_NOT_LOADED, station.dimension()));
 		}
 		ScanService.StartResult result = railway.scans().start(station, level, railway.config(),
-				context.getSource().getServer().getTickCount(), railway.state().revision());
+				context.getSource().getServer().getTickCount(), railway.state().revision(), ScanTrigger.COMMAND);
 		if (result instanceof ScanService.StartResult.Rejected rejected) {
 			return fail(context.getSource(), rejected.failure());
 		}
 		String jobId = ((ScanService.StartResult.Started) result).jobId();
 		return ok(context.getSource(), "scan.started", station.id().value(), jobId);
+	}
+
+	private static int networkRescan(CommandContext<CommandSourceStack> context) {
+		Railway railway = railway(context.getSource());
+		if (railway == null) {
+			return 0;
+		}
+		CommandSourceStack source = context.getSource();
+		int queued = railway.scans().rescanAll(railway.state().stations(), railway.config(),
+				source.getServer(), railway.state().revision());
+		if (queued < 0) {
+			source.sendFailure(Messages.text(source, "scan.rescan.busy"));
+			return 0;
+		}
+		if (queued == 0) {
+			return ok(source, "scan.rescan.none");
+		}
+		return ok(source, "scan.rescan.queued", queued);
 	}
 
 	private static int networkStatusAll(CommandContext<CommandSourceStack> context) {
@@ -782,7 +824,7 @@ public final class RailCommand {
 		ServerLevel level = RailWorld.level(source.getServer(), station.dimension());
 		if (level != null) {
 			ScanService.StartResult started = scans.autoStart(station, level, railway.config(),
-					source.getServer().getTickCount(), railway.state().revision());
+					source.getServer().getTickCount(), railway.state().revision(), ScanTrigger.ROUTE_CHECK);
 			if (started instanceof ScanService.StartResult.Started) {
 				fail(source, ScanService.autoStartedFailure(station.displayName()));
 				return null;
@@ -879,6 +921,50 @@ public final class RailCommand {
 		return 1;
 	}
 
+	private static final int DEFAULT_JOURNAL_LINES = 10;
+
+	private static int diagnosticsFailures(CommandContext<CommandSourceStack> context) {
+		CommandSourceStack source = context.getSource();
+		FailureJournal journal = FailureJournal.active();
+		if (journal == null) {
+			source.sendFailure(Messages.text(source, "diagnostics.failures.unavailable"));
+			return 0;
+		}
+		int count = DEFAULT_JOURNAL_LINES;
+		try {
+			count = IntegerArgumentType.getInteger(context, "count");
+		} catch (IllegalArgumentException ignored) {
+			// The argument is optional; keep the default.
+		}
+		List<FailureJournal.Entry> entries = journal.recent(count);
+		if (entries.isEmpty()) {
+			source.sendSuccess(() -> Messages.text(source, "diagnostics.failures.empty"), false);
+			return 1;
+		}
+		source.sendSuccess(() -> Messages.text(source, "diagnostics.failures.header", entries.size()), false);
+		for (FailureJournal.Entry entry : entries) {
+			source.sendSuccess(() -> Component.literal(entry.toString()), false);
+		}
+		return 1;
+	}
+
+	private static int diagnosticsRef(CommandContext<CommandSourceStack> context) {
+		CommandSourceStack source = context.getSource();
+		FailureJournal journal = FailureJournal.active();
+		if (journal == null) {
+			source.sendFailure(Messages.text(source, "diagnostics.failures.unavailable"));
+			return 0;
+		}
+		String ref = StringArgumentType.getString(context, "ref");
+		FailureJournal.Entry entry = journal.find(ref).orElse(null);
+		if (entry == null) {
+			source.sendFailure(Messages.text(source, "diagnostics.ref.missing", ref));
+			return 0;
+		}
+		source.sendSuccess(() -> Component.literal(entry.toString()), false);
+		return 1;
+	}
+
 	// ----------------------------------------------------------------- reload
 
 	private static int reload(CommandContext<CommandSourceStack> context) {
@@ -890,6 +976,9 @@ public final class RailCommand {
 		List<String> errors = railway.reloadConfig();
 		CommandSourceStack source = context.getSource();
 		if (errors != null) {
+			EventLog.event("config.reload.reject").tick(source.getServer().getTickCount())
+					.field("actor", actorName(source)).field("actorUuid", actorUuid(source))
+					.field("detail", String.join("; ", errors)).warn(LOGGER);
 			source.sendSuccess(() -> Messages.text(source, "reload.invalid"), false);
 			for (String error : errors) {
 				source.sendFailure(Component.literal(error));
@@ -903,6 +992,39 @@ public final class RailCommand {
 	}
 
 	// ----------------------------------------------------------------- helpers
+
+	private static Command<CommandSourceStack> logged(String name, Command<CommandSourceStack> body) {
+		return context -> {
+			CommandSourceStack source = context.getSource();
+			long tick = source.getServer().getTickCount();
+			String actor = actorName(source);
+			UUID actorUuid = actorUuid(source);
+			String input = context.getInput().trim();
+			int result;
+			try {
+				result = body.run(context);
+			} catch (RuntimeException e) {
+				EventLog.event("command.error").tick(tick).field("actor", actor).field("actorUuid", actorUuid)
+						.field("cmd", name).field("input", input).cause(e).error(LOGGER);
+				throw e;
+			}
+			EventLog.event("command").tick(tick).field("actor", actor).field("actorUuid", actorUuid)
+					.field("cmd", name).field("input", input)
+					.field("result", result != 0 ? "ok" : "reject").info(LOGGER);
+			return result;
+		};
+	}
+
+	private static String actorName(CommandSourceStack source) {
+		if (source.getEntity() instanceof ServerPlayer player) {
+			return player.getPlainTextName();
+		}
+		return source.getTextName();
+	}
+
+	private static UUID actorUuid(CommandSourceStack source) {
+		return source.getEntity() instanceof ServerPlayer player ? player.getUUID() : null;
+	}
 
 	private static Railway railway(CommandSourceStack source) {
 		if (!Railway.isStarted()) {
@@ -985,6 +1107,9 @@ public final class RailCommand {
 	}
 
 	private static int fail(CommandSourceStack source, Failure failure) {
+		EventLog.event("command.reject").tick(source.getServer().getTickCount())
+				.field("actor", actorName(source)).field("actorUuid", actorUuid(source))
+				.failure(failure).warn(LOGGER);
 		source.sendFailure(Messages.failure(source, failure));
 		return 0;
 	}

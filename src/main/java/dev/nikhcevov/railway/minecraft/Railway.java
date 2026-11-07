@@ -3,6 +3,8 @@ package dev.nikhcevov.railway.minecraft;
 import dev.nikhcevov.railway.commands.Messages;
 import dev.nikhcevov.railway.diagnostics.DiagnosticsService;
 import dev.nikhcevov.railway.domain.Station;
+import dev.nikhcevov.railway.logging.EventLog;
+import dev.nikhcevov.railway.logging.FailureJournal;
 import dev.nikhcevov.railway.persistence.Config;
 import dev.nikhcevov.railway.persistence.JsonStateStore;
 import dev.nikhcevov.railway.persistence.StateStore;
@@ -30,7 +32,7 @@ public final class Railway {
 	private final MinecraftServer server;
 	private Config config;
 	private WorldState state;
-	private StateStore store;
+	private JsonStateStore store;
 	private ScanService scans;
 	private ChunkTicketManager tickets;
 	private TripService trips;
@@ -103,7 +105,13 @@ public final class Railway {
 				() -> state == null ? List.of() : state.stations());
 		trips = new TripService(this, LOGGER, tickets);
 		signs = new SignRegistrationService(this, LOGGER);
-		store = new JsonStateStore(server.getWorldPath(LevelResource.ROOT));
+		store = new JsonStateStore(server.getWorldPath(LevelResource.ROOT), LOGGER);
+		FailureJournal journal = FailureJournal.install(store.file().resolveSibling("failures.jsonl"));
+		EventLog.event("journal.install")
+				.field("path", journal.file().toString())
+				.field("capacity", FailureJournal.DEFAULT_CAPACITY)
+				.field("maxBytes", FailureJournal.DEFAULT_MAX_BYTES)
+				.info(LOGGER);
 		try {
 			state = store.load();
 			stateLoaded = true;
@@ -112,7 +120,10 @@ public final class Railway {
 			stateFailureReason = e.getMessage();
 			disabled = true;
 			disabledReason = e.getMessage();
-			LOGGER.error("Railway state disabled: {}", e.getMessage());
+			EventLog.event("state.fail")
+					.field("path", store.file().toString())
+					.cause(e)
+					.error(LOGGER);
 			state = new WorldState();
 		}
 
@@ -131,6 +142,30 @@ public final class Railway {
 		if (disabled) {
 			LOGGER.error("{}", Messages.format(Messages.Lang.EN, "system.disabled", disabledReason));
 		}
+		EventLog.event("start")
+				.field("version", modVersion())
+				.field("java", System.getProperty("java.version"))
+				.field("schema", JsonStateStore.SCHEMA_VERSION)
+				.field("state", store.file().toString())
+				.field("loaded", String.valueOf(stateLoaded))
+				.field("stations", state.stations().size())
+				.field("bindings", state.bindings().size())
+				.field("markers", state.signMarkers().size())
+				.field("trips", state.trips().size())
+				.field("maxActiveTrips", config.maxActiveTrips())
+				.field("maxManagedChunkTickets", config.maxManagedChunkTickets())
+				.field("maxRailsPerScan", config.maxRailsPerScan())
+				.field("maxRouteLength", config.maxRouteLength())
+				.field("scanRailsPerTick", config.scanRailsPerTick())
+				.field("scanTimeBudgetMs", config.scanTimeBudgetMs())
+				.field("speed", String.valueOf(config.effectiveSpeed()))
+				.info(LOGGER);
+	}
+
+	private static String modVersion() {
+		return FabricLoader.getInstance().getModContainer("railway")
+				.map(container -> container.getMetadata().getVersion().getFriendlyString())
+				.orElse("unknown");
 	}
 
 	/** Queues the automatic component scans when the server becomes ready. */
@@ -251,7 +286,10 @@ public final class Railway {
 		try {
 			store.save(state);
 		} catch (IOException e) {
-			LOGGER.error("Cannot save Railway state: {}", e.getMessage(), e);
+			EventLog.event("state.save.fail")
+					.field("path", store.file().toString())
+					.cause(e)
+					.error(LOGGER);
 		}
 	}
 

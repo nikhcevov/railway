@@ -12,7 +12,7 @@ the station exit and the service cart is removed.
 server; no client mod, resource pack, or custom blocks are required.
 
 > **Alpha release.** Test on a backup world. The current version is
-> `0.1.0-alpha.7`.
+> `0.1.0-alpha.8`.
 
 ## Requirements
 
@@ -44,11 +44,19 @@ server; no client mod, resource pack, or custom blocks are required.
   not resume automatically, and leftover managed carts are handled.
 - **Diagnostics.** Operators can inspect routes, scans, tickets, recovery, and
   active trips.
+- **Debuggable failures.** Every failure is logged with a stable `ref`, a
+  non-empty reason, position and identifiers; the same `[ref ...]` is shown in
+  chat. Recent warnings/errors are journaled to `<world>/railway/failures.jsonl`
+  and readable in game with `/rail diagnostics failures` and
+  `/rail diagnostics ref <ref>`.
+- **Full rescan on demand.** `/rail network rescan` drops every cached graph and
+  re-analyzes each connected component once; a server start already performs the
+  same full pass.
 
 ## Quick start
 
 1. Install Fabric Loader and Fabric API on a Minecraft `26.1.2` server.
-2. Put `railway-0.1.0-alpha.7.jar` in the server `mods/` directory.
+2. Put `railway-0.1.0-alpha.8.jar` in the server `mods/` directory.
 3. Start the server once. Railway creates `config/railway.json`.
 4. Give builders OP level 2, or list their UUIDs in `builders`.
 5. Build a station from vanilla rails, wall signs, and stone buttons.

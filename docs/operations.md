@@ -220,6 +220,57 @@ Recovery tickets and state are reported by `/rail diagnostics`.
 | `RECOVERY_PENDING` | Wait for startup/late-chunk reconciliation |
 | `INTERNAL` | Check server log and `/rail diagnostics`; report reproduction |
 
+## Log events
+
+Railway logs one structured line per failure or lifecycle decision:
+
+```
+event=<name> tick=<server tick> [scan=…] [trip=…] [station=…] [name=…]
+[player=…] [dim=…] [pos="x y z"] [trigger=…] code=<CODE> detail="…" ref=<8 hex>
+```
+
+Rules that make a production log usable after the fact:
+
+- every failure carries `code`, a non-empty `detail`, and a short `ref`; the same
+  ref appears in the player-facing message as `[ref XXXXXXXX]` and identifies
+  the matching log line and journal record;
+- command executions log actor, dotted command name, raw input, and result;
+- scans log the trigger (`STARTUP`, `COMMAND`, `TRIP_LAUNCH`, `ROUTE_CHECK`,
+  `SIGN_ANCHOR`, `RESCAN`), station, dock, graph revision, progress, and elapsed
+  ticks; graph invalidation names the cause and position;
+- trips log start, departure, arrival, completion, detach, abort and end with
+  the route endpoints, phase, cart position and speed;
+- unexpected exceptions are logged once with a stack trace through the event
+  that reported them; `Failure.detail` is never empty, even for an exception
+  without a message.
+
+Every `WARN` and `ERROR` event is also appended to the failure journal at
+`<world>/railway/failures.jsonl` (newest 256 kept in memory, file rotates at
+1 MiB). Read it in game with `/rail diagnostics failures [count]` and
+`/rail diagnostics ref <ref>`; see [commands](commands.md#rail-diagnostics-failures-count).
+
+
+Events to grep for:
+
+| Event | Level | Meaning |
+|---|---|---|
+| `start` | INFO | Mod version, state path, state counts, effective limits |
+| `state.load`, `state.migrate`, `state.save` | INFO/DEBUG | State file loaded/migrated/saved |
+| `state.fail`, `state.save.fail` | ERROR | State disabled or not writable; stack trace attached |
+| `command`, `command.reject`, `command.error` | INFO/WARN/ERROR | `/rail` execution: actor, command, input, result; rejections carry the failure |
+| `scan.start`, `scan.reject`, `scan.complete`, `scan.fail`, `scan.discard` | INFO/WARN | Scan lifecycle with trigger, station, dock, revision, progress |
+| `scan.rescan.queue`, `scan.rescan.done`, `scan.rescan.reject` | INFO/WARN | Forced full-network rescan queue (`/rail network rescan`); jobs use `trigger=RESCAN_ALL` |
+| `graph.invalidate` | INFO | A cached graph was dropped after a block change, sign change, or rescan |
+| `scan.startup.queue`, `scan.startup.done`, `scan.skip`, `scan.startup.reject`, `scan.budget_blocked`, `scan.probe.schedule_fail` | INFO/WARN | Startup queue and blocking conditions |
+| `trip.start`, `trip.reject`, `trip.depart`, `trip.arriving`, `trip.complete`, `trip.detach`, `trip.end`, `trip.timeout` | INFO/WARN | Trip lifecycle |
+| `trip.abort`, `trip.tick.error` | WARN/ERROR | Abort with failure code/detail/ref and a stack trace when an exception caused it |
+| `sign.register`, `sign.reject`, `sign.marker.remove`, `sign.button.remove` | INFO/WARN | Sign registration and marker invalidation, including rejected edits |
+| `config.reload.reject` | WARN | Invalid config on `/rail reload` |
+
+To investigate a player report, search the log for the player name, the station
+name, or the `ref` shown in chat. A single `tick=` value correlates all events
+from the same moment.
+
 ## Backups and removal
 
 Before upgrading, stop the server and back up the world. Migrations create

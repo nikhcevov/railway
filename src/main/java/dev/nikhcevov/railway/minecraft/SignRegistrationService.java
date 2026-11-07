@@ -9,6 +9,7 @@ import dev.nikhcevov.railway.domain.SignMarker;
 import dev.nikhcevov.railway.domain.Station;
 import dev.nikhcevov.railway.domain.StationId;
 import dev.nikhcevov.railway.domain.StationNames;
+import dev.nikhcevov.railway.logging.EventLog;
 import dev.nikhcevov.railway.network.RailGraph;
 import dev.nikhcevov.railway.persistence.WorldState;
 import dev.nikhcevov.railway.sign.BlockSample;
@@ -370,12 +371,8 @@ public final class SignRegistrationService {
 			railway.saveState();
 
 			if (anchorMode) {
-				ScanService.StartResult scan = railway.scans().start(stationFrom, level, railway.config(),
-						railway.server().getTickCount(), state.revision());
-				if (scan instanceof ScanService.StartResult.Rejected rejected) {
-					logger.warn("Sign station {} anchored but scan did not start: {} {}",
-							stationFrom.displayName(), rejected.failure().code(), rejected.failure().detail());
-				}
+				railway.scans().start(stationFrom, level, railway.config(),
+						railway.server().getTickCount(), state.revision(), ScanTrigger.SIGN_ANCHOR);
 				refreshConnectedScans(stationFrom, stationFrom.id());
 			} else if (mainMoved || bindingAddedOrChanged) {
 				// A new route, a moved main, or a legacy sign gaining its local source
@@ -385,6 +382,26 @@ public final class SignRegistrationService {
 
 			sendSuccess(player, stationFrom, stationTo, stationOnly, anchorMode, mainMoved,
 					reactivated, marker, existingBinding);
+			String bindingState = binding == null ? null
+					: existingBinding == null ? "added"
+					: existingBinding.equals(binding) ? "unchanged" : "replaced";
+			EventLog.event("sign.register")
+					.field("pos", signLocation)
+					.field("dim", dimension)
+					.field("player", player.getPlainTextName())
+					.field("uuid", player.getUUID())
+					.station(stationFrom.id(), stationFrom.displayName())
+					.field("to", stationTo == null ? null : stationTo.id().value())
+					.field("toName", stationTo == null ? null : stationTo.displayName())
+					.field("dock", stationFrom.dock())
+					.field("exit", exit)
+					.field("anchorMode", Boolean.toString(anchorMode))
+					.field("stationOnly", Boolean.toString(stationOnly))
+					.field("mainMoved", Boolean.toString(mainMoved))
+					.field("reactivated", Boolean.toString(reactivated))
+					.field("marker", "updated")
+					.field("binding", bindingState)
+					.info(logger);
 			if (anchorMode) {
 				level.sendParticles(ParticleTypes.END_ROD,
 						stationFrom.dock().x() + 0.5, stationFrom.dock().y() + 1.0,
@@ -392,9 +409,8 @@ public final class SignRegistrationService {
 			}
 			return new Result.Registered(stationFrom, stationTo, binding, desiredMarker);
 		} catch (IllegalStateException | IllegalArgumentException e) {
-			logger.error("Sign registration failed after validation", e);
-			return reject(player, sign, front, previous, marker,
-					Failure.detail(FailureCode.INTERNAL, e.getMessage()));
+			Failure failure = Failure.fromThrowable(FailureCode.INTERNAL, e);
+			return reject(player, sign, front, previous, marker, failure);
 		}
 	}
 
@@ -422,12 +438,8 @@ public final class SignRegistrationService {
 				ServerLevel level = RailWorld.level(railway.server(), station.dimension());
 				if (level != null) {
 					railway.scans().invalidate(id);
-					ScanService.StartResult result = railway.scans().start(station, level,
-							railway.config(), tick, state.revision());
-					if (result instanceof ScanService.StartResult.Rejected rejected) {
-						logger.warn("Connected station {} was not rescanned: {} {}",
-								station.displayName(), rejected.failure().code(), rejected.failure().detail());
-					}
+					railway.scans().start(station, level,
+							railway.config(), tick, state.revision(), ScanTrigger.RESCAN);
 				}
 			}
 			for (Binding binding : state.bindingsFor(id)) {
@@ -630,8 +642,18 @@ public final class SignRegistrationService {
 		if (marker != null) {
 			restore(sign, front, previous);
 		}
-		logger.debug("Sign registration rejected at {}: {} {}",
-				RailWorld.loc(sign.getBlockPos()).shortString(), failure.code(), failure.detail());
+		EventLog log = EventLog.event("sign.reject")
+				.field("pos", RailWorld.loc(sign.getBlockPos()))
+				.field("front", Boolean.toString(front))
+				.field("marker", Boolean.toString(marker != null));
+		if (sign.getLevel() instanceof ServerLevel level) {
+			log.field("dim", RailWorld.dimension(level));
+		}
+		if (player != null) {
+			log.field("player", player.getPlainTextName())
+					.field("uuid", player.getUUID());
+		}
+		log.failure(failure).warn(logger);
 		if (player != null) {
 			player.sendSystemMessage(Messages.failure(player, failure));
 		}
@@ -775,18 +797,32 @@ public final class SignRegistrationService {
 		if (marker.button() != null) {
 			changed |= state.removeBinding(dimension, marker.button()).isPresent();
 		}
-		if (marker.anchorStationId() != null) {
-			Station station = state.station(marker.anchorStationId()).orElse(null);
-			if (station != null && station.isAnchored() && station.enabled()
-					&& !state.hasOtherSignMarkers(station.id(), dimension, marker.sign())) {
-				// The last unit is gone: disable the station but keep its data. With
-				// other units left the station stays enabled and keeps its main.
-				state.updateStation(station.withEnabled(false, state.nextRevision()));
-				changed = true;
-			}
+		Station anchor = marker.anchorStationId() == null
+				? null : state.station(marker.anchorStationId()).orElse(null);
+		boolean disabled = false;
+		if (anchor != null && anchor.isAnchored() && anchor.enabled()
+				&& !state.hasOtherSignMarkers(anchor.id(), dimension, marker.sign())) {
+			// The last unit is gone: disable the station but keep its data. With
+			// other units left the station stays enabled and keeps its main.
+			state.updateStation(anchor.withEnabled(false, state.nextRevision()));
+			disabled = true;
+			changed = true;
 		}
 		if (changed) {
-			logger.info("Removed sign marker at {}", marker.sign().shortString());
+			StationId logStationId = marker.anchorStationId() != null
+					? marker.anchorStationId() : marker.stationId();
+			Station logStation = anchor != null ? anchor
+					: logStationId == null ? null : state.station(logStationId).orElse(null);
+			EventLog log = EventLog.event("sign.marker.remove")
+					.field("pos", marker.sign())
+					.field("dim", dimension)
+					.field("disabled", Boolean.toString(disabled));
+			if (logStation != null) {
+				log.station(logStation.id(), logStation.displayName());
+			} else if (logStationId != null) {
+				log.field("station", logStationId.value());
+			}
+			log.info(logger);
 		}
 		return changed;
 	}
@@ -798,23 +834,45 @@ public final class SignRegistrationService {
 			SignMarker marker,
 			Set<String> handledSigns
 	) {
-		boolean changed = state.removeBinding(dimension, button).isPresent();
+		boolean bindingRemoved = state.removeBinding(dimension, button).isPresent();
 		if (marker == null) {
-			if (changed) {
-				logger.info("Removed button binding at {}", button.shortString());
+			if (bindingRemoved) {
+				logButtonRemoval(dimension, button, null, null, true);
 			}
-			return changed;
+			return bindingRemoved;
 		}
 		if (!handledSigns.add(WorldState.signMarkerKey(marker.dimension(), marker.sign()))) {
-			return changed;
+			return bindingRemoved;
 		}
+		StationId stationId = marker.anchorStationId() != null
+				? marker.anchorStationId() : marker.ownerStationId();
+		Station station = stationId == null ? null : state.station(stationId).orElse(null);
 		if (marker.anchorStationId() != null) {
 			state.updateSignMarker(marker.withButton(null));
 		} else {
 			state.removeSignMarker(dimension, marker.sign());
 		}
-		logger.info("Removed button registration at {}", button.shortString());
+		logButtonRemoval(dimension, button, stationId, station, bindingRemoved);
 		return true;
+	}
+
+	private void logButtonRemoval(
+			String dimension,
+			BlockLocation button,
+			StationId stationId,
+			Station station,
+			boolean bindingRemoved
+	) {
+		EventLog log = EventLog.event("sign.button.remove")
+				.field("pos", button)
+				.field("dim", dimension)
+				.field("bindingRemoved", Boolean.toString(bindingRemoved));
+		if (station != null) {
+			log.station(station.id(), station.displayName());
+		} else if (stationId != null) {
+			log.field("station", stationId.value());
+		}
+		log.info(logger);
 	}
 
 	private static BlockLocation buttonSupport(SignMarker marker) {

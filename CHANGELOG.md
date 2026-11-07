@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.1.0-alpha.8 — 2026-11-08
+
+- Structured, greppable logging for failures and lifecycle decisions:
+  `event=... key=value ... code=... detail="..." ref=<id>`. The startup line
+  reports the exact mod version, state path and effective limits.
+- Every `Failure` now carries a stable `ref`, is logged with a non-empty detail
+  (even when an exception has no message), and shows the same `[ref ...]` to the
+  player. `INTERNAL` aborts can no longer appear without a reason.
+- Rejected sign edits are logged at WARN instead of DEBUG, and command
+  executions log actor, raw input and result.
+- Persistent failure journal at `<world>/railway/failures.jsonl` (256-entry
+  memory ring, 1 MiB rotation) with `/rail diagnostics failures [count]` and
+  `/rail diagnostics ref <ref>`.
+- New `/rail network rescan`: drops every cached graph and re-analyzes each
+  connected component once, one scan at a time. Startup already performs the
+  same full pass, so a version change needs no extra rescan.
+- Scan, trip, sign, command, state, recovery and message-catalog events are
+  documented in `docs/operations.md`; `/rail diagnostics` remains the live-state
+  snapshot.
+
 ## 0.1.0-alpha.7 — 2026-11-01
 
 - Restoring a disabled station with a sign at a different dock now moves the

@@ -9,6 +9,7 @@ import dev.nikhcevov.railway.minecraft.PlayerActions;
 import dev.nikhcevov.railway.minecraft.RailWorld;
 import dev.nikhcevov.railway.minecraft.Railway;
 import dev.nikhcevov.railway.minecraft.ScanService;
+import dev.nikhcevov.railway.minecraft.ScanTrigger;
 import dev.nikhcevov.railway.network.RailGraph;
 
 import net.minecraft.server.MinecraftServer;
@@ -250,7 +251,7 @@ public final class FixtureService {
 				return;
 			}
 			ScanService.StartResult result = scans.start(home, level, railway.config(), tick,
-					railway.state().revision());
+					railway.state().revision(), ScanTrigger.COMMAND);
 			if (result instanceof ScanService.StartResult.Started started) {
 				jobId = started.jobId();
 				phase = Phase.SCANNING;

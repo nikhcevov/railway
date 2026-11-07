@@ -11,6 +11,10 @@ import dev.nikhcevov.railway.domain.SignMarker;
 import dev.nikhcevov.railway.domain.Station;
 import dev.nikhcevov.railway.domain.StationId;
 import dev.nikhcevov.railway.domain.StationNames;
+import dev.nikhcevov.railway.logging.EventLog;
+
+import org.slf4j.Logger;
+import org.slf4j.helpers.NOPLogger;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -34,9 +38,15 @@ public final class JsonStateStore implements StateStore {
 	private static final Gson GSON = new GsonBuilder().setPrettyPrinting().disableHtmlEscaping().create();
 
 	private final Path file;
+	private final Logger logger;
 
 	public JsonStateStore(Path worldRoot) {
+		this(worldRoot, NOPLogger.NOP_LOGGER);
+	}
+
+	public JsonStateStore(Path worldRoot, Logger logger) {
 		this.file = worldRoot.resolve("railway").resolve("state.json");
+		this.logger = logger;
 	}
 
 	@Override
@@ -71,6 +81,11 @@ public final class JsonStateStore implements StateStore {
 		}
 		if (schema < SCHEMA_VERSION) {
 			backup(schema);
+			EventLog.event("state.migrate")
+					.field("from", schema)
+					.field("to", SCHEMA_VERSION)
+					.field("backup", backupPath(schema).toString())
+					.info(logger);
 			if (schema < 5) {
 				stripArrivalPlatforms(object);
 			}
@@ -86,6 +101,18 @@ public final class JsonStateStore implements StateStore {
 			throw new StateStore.StateException("empty state file");
 		}
 		validate(parsed, state, schema);
+		EventLog loadEvent = EventLog.event("state.load")
+				.field("schema", SCHEMA_VERSION);
+		if (schema != SCHEMA_VERSION) {
+			loadEvent.field("fileSchema", schema);
+		}
+		loadEvent
+				.field("stations", state.stations().size())
+				.field("bindings", state.bindings().size())
+				.field("markers", state.signMarkers().size())
+				.field("trips", state.trips().size())
+				.field("path", file.toString())
+				.info(logger);
 		return state;
 	}
 
@@ -97,8 +124,12 @@ public final class JsonStateStore implements StateStore {
 		return root.getMessage() == null ? root.getClass().getSimpleName() : root.getMessage();
 	}
 
+	private Path backupPath(int schema) {
+		return file.resolveSibling("state.v" + schema + ".bak");
+	}
+
 	private void backup(int schema) throws StateStore.StateException {
-		Path backup = file.resolveSibling("state.v" + schema + ".bak");
+		Path backup = backupPath(schema);
 		try {
 			Files.copy(file, backup, StandardCopyOption.REPLACE_EXISTING);
 		} catch (IOException e) {
@@ -370,6 +401,13 @@ public final class JsonStateStore implements StateStore {
 		Path tmp = file.resolveSibling("state.json.tmp");
 		Files.writeString(tmp, GSON.toJson(fileData), StandardCharsets.UTF_8);
 		Files.move(tmp, file, StandardCopyOption.REPLACE_EXISTING);
+		EventLog.event("state.save")
+				.field("stations", state.stations().size())
+				.field("bindings", state.bindings().size())
+				.field("markers", state.signMarkers().size())
+				.field("trips", state.trips().size())
+				.field("path", file.toString())
+				.debug(logger);
 	}
 
 	public Path file() {

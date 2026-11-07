@@ -7,6 +7,7 @@ import dev.nikhcevov.railway.minecraft.PlayerActions;
 import dev.nikhcevov.railway.minecraft.RailWorld;
 import dev.nikhcevov.railway.minecraft.Railway;
 import dev.nikhcevov.railway.minecraft.ScanService;
+import dev.nikhcevov.railway.minecraft.ScanTrigger;
 
 import net.fabricmc.fabric.api.gametest.v1.CustomTestMethodInvoker;
 
@@ -54,7 +55,7 @@ abstract class GameTestSupport implements CustomTestMethodInvoker {
 	static void scan(GameTestHelper helper, ScanService scans, Station station, ServerLevel level,
 			MinecraftServer server) {
 		ScanService.StartResult result = scans.start(station, level, Railway.get().config(),
-				server.getTickCount(), Railway.get().state().revision());
+				server.getTickCount(), Railway.get().state().revision(), ScanTrigger.COMMAND);
 		if (!(result instanceof ScanService.StartResult.Started)) {
 			helper.fail("scan did not start for " + station.id() + ": " + result);
 		}

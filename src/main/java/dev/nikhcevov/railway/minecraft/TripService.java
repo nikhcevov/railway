@@ -15,6 +15,7 @@ import dev.nikhcevov.railway.domain.StationId;
 import dev.nikhcevov.railway.domain.Trip;
 import dev.nikhcevov.railway.domain.TripId;
 import dev.nikhcevov.railway.domain.TripPhase;
+import dev.nikhcevov.railway.logging.EventLog;
 import dev.nikhcevov.railway.motion.MotionProfile;
 import dev.nikhcevov.railway.network.GraphRoutePlan;
 import dev.nikhcevov.railway.network.LaunchCheck;
@@ -41,6 +42,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -162,8 +164,16 @@ public final class TripService {
 	// ------------------------------------------------------------------ launch
 
 	public StartResult start(ServerPlayer player, Binding binding) {
+		long tick = railway.server().getTickCount();
+		StartResult result = startInternal(player, binding, tick);
+		if (result instanceof StartResult.Rejected rejected) {
+			logLaunchRejection(player, binding, rejected.failure(), tick);
+		}
+		return result;
+	}
+
+	private StartResult startInternal(ServerPlayer player, Binding binding, long tick) {
 		MinecraftServer server = railway.server();
-		long tick = server.getTickCount();
 		Config config = railway.config();
 
 		if (railway.disabled()) {
@@ -379,16 +389,34 @@ public final class TripService {
 					plan.from(), plan.to(), TripPhase.BOARDING, tick, plan.dimension(),
 					RailWorld.loc(cart.blockPosition())));
 			railway.saveState();
+			EventLog.event("trip.start")
+					.tick(tick)
+					.trip(tripId)
+					.field("player", player.getPlainTextName())
+					.field("playerId", player.getUUID())
+					.field("from", plan.from().value())
+					.field("fromName", stationName(plan.from()))
+					.field("to", plan.to().value())
+					.field("toName", stationName(plan.to()))
+					.field("dim", plan.dimension())
+					.field("depart", plan.fromDock())
+					.field("arrive", plan.toDock())
+					.field("length", plan.length())
+					.field("steps", plan.steps().size())
+					.revision(fromGraph.revision())
+					.field("component", plan.componentKey())
+					.field("speed", String.format(Locale.ROOT, "%.2f", config.effectiveSpeed()))
+					.field("maxTripTicks", config.maxTripTicks())
+					.info(logger);
 			Messages.actionBar(player, "actionbar.boarding");
 			return new StartResult.Started(tripId);
 		} catch (RuntimeException e) {
-			logger.error("Failed to start trip", e);
 			if (cart != null) {
 				PlayerActions.discardCart(cart);
 			}
 			tickets.release(tripId);
 			reservations.releaseAll(tripId.value());
-			return reject(FailureCode.INTERNAL, e.getMessage());
+			return reject(Failure.fromThrowable(FailureCode.INTERNAL, e));
 		}
 	}
 
@@ -415,7 +443,7 @@ public final class TripService {
 		ServerLevel level = RailWorld.level(railway.server(), station.dimension());
 		if (level != null) {
 			ScanService.StartResult started = scans.autoStart(station, level, railway.config(),
-					railway.server().getTickCount(), railway.state().revision());
+					railway.server().getTickCount(), railway.state().revision(), ScanTrigger.TRIP_LAUNCH);
 			if (started instanceof ScanService.StartResult.Started) {
 				return new GraphLookup.Failed(ScanService.autoStartedFailure(station.displayName()));
 			}
@@ -426,6 +454,41 @@ public final class TripService {
 		Failure scanFailure = scans.failure(station.id());
 		return new GraphLookup.Failed(scanFailure != null ? scanFailure
 				: Failure.detail(FailureCode.SCAN_INCOMPLETE, station.displayName()));
+	}
+
+	private void logLaunchRejection(ServerPlayer player, Binding binding, Failure failure, long tick) {
+		Station from = railway.state().station(binding.fromStationId()).orElse(null);
+		Station to = railway.state().station(binding.toStationId()).orElse(null);
+		EventLog event = EventLog.event("trip.reject")
+				.tick(tick)
+				.field("player", player.getPlainTextName())
+				.field("playerId", player.getUUID())
+				.field("button", binding.button())
+				.field("from", binding.fromStationId().value())
+				.field("fromName", from == null ? null : from.displayName())
+				.field("to", binding.toStationId().value())
+				.field("toName", to == null ? null : to.displayName())
+				.failure(failure);
+		if (failure.code() == FailureCode.INTERNAL) {
+			event.warn(logger);
+		} else {
+			event.info(logger);
+		}
+	}
+
+	private String stationName(StationId id) {
+		return railway.state().station(id).map(Station::displayName).orElse(id.value());
+	}
+
+	private void logDetach(ActiveTrip at, ServerPlayer player, long tick) {
+		EventLog.event("trip.detach")
+				.tick(tick)
+				.trip(at.trip.id())
+				.field("player", player.getPlainTextName())
+				.phase(at.trip.phase())
+				.field("cart", RailWorld.loc(at.cart.blockPosition()))
+				.field("reason", "not riding service cart")
+				.warn(logger);
 	}
 
 	private StartResult reject(FailureCode code, String detail) {
@@ -451,8 +514,19 @@ public final class TripService {
 			try {
 				tickOne(server, at, tick);
 			} catch (RuntimeException e) {
-				logger.error("Trip {} failed unexpectedly", id, e);
-				abort(at, tick, Failure.detail(FailureCode.INTERNAL, e.getMessage()));
+				if (at.trip.phase().isTerminal()) {
+					ServerPlayer player = server.getPlayerList().getPlayer(at.trip.playerUuid());
+					EventLog.event("trip.tick.error")
+							.tick(tick)
+							.trip(id)
+							.field("player", player == null
+									? at.trip.playerUuid().toString() : player.getPlainTextName())
+							.phase(at.trip.phase())
+							.cause(e)
+							.error(logger);
+				} else {
+					abort(at, tick, Failure.fromThrowable(FailureCode.INTERNAL, e));
+				}
 			}
 			if (active.get(id) == at) {
 				checkpoint(at, tick);
@@ -474,12 +548,24 @@ public final class TripService {
 		Minecart cart = at.cart;
 
 		if (player == null) {
-			logger.info("Trip {} ended: player offline", trip.id());
+			EventLog.event("trip.end")
+					.tick(tick)
+					.trip(trip.id())
+					.field("player", trip.playerUuid().toString())
+					.phase(trip.phase())
+					.field("reason", "player_offline")
+					.info(logger);
 			discardAndRemove(at);
 			return;
 		}
 		if (cart.isRemoved()) {
-			logger.info("Trip {} ended: cart removed", trip.id());
+			EventLog.event("trip.end")
+					.tick(tick)
+					.trip(trip.id())
+					.field("player", player.getPlainTextName())
+					.phase(trip.phase())
+					.field("reason", "cart_removed")
+					.info(logger);
 			releaseAndRemove(at);
 			if (trip.phase() != TripPhase.ABORTING) {
 				notifyAborted(player);
@@ -487,18 +573,32 @@ public final class TripService {
 			return;
 		}
 		if (!player.isAlive()) {
-			logger.info("Trip {} ended: player dead", trip.id());
+			EventLog.event("trip.end")
+					.tick(tick)
+					.trip(trip.id())
+					.field("player", player.getPlainTextName())
+					.phase(trip.phase())
+					.field("reason", "player_dead")
+					.info(logger);
 			abort(at, tick, Failure.detail(FailureCode.INTERNAL, "player died"));
 			return;
 		}
 		if (player.getVehicle() != cart) {
+			logDetach(at, player, tick);
 			discardAndRemove(at);
 			notifyAborted(player);
 			return;
 		}
 		if (tick - trip.startedTick() > at.maxTripTicks) {
-			logger.warn("Trip {} timed out after {} ticks", trip.id(), tick - trip.startedTick());
-			abort(at, tick, Failure.detail(FailureCode.INTERNAL, "trip timeout"));
+			Failure timeout = Failure.detail(FailureCode.INTERNAL, "trip timeout");
+			EventLog.event("trip.timeout")
+					.tick(tick)
+					.trip(trip.id())
+					.field("player", player.getPlainTextName())
+					.field("ticks", tick - trip.startedTick())
+					.failure(timeout)
+					.warn(logger);
+			abort(at, tick, timeout);
 			return;
 		}
 
@@ -520,6 +620,13 @@ public final class TripService {
 						return;
 					}
 					trip.transitionTo(TripPhase.RUNNING, tick);
+					EventLog.event("trip.depart")
+							.tick(tick)
+							.trip(trip.id())
+							.field("player", player.getPlainTextName())
+							.field("dock", at.plan.fromDock())
+							.field("steps", at.plan.steps().size())
+							.info(logger);
 					Station to = railway.state().station(at.plan.to()).orElse(null);
 					Messages.actionBar(player, "actionbar.departing",
 							to == null ? at.plan.to().value() : to.displayName());
@@ -619,6 +726,12 @@ public final class TripService {
 			if (remaining <= STOP_DISTANCE && at.speed <= STOP_SPEED) {
 				stopAtDock(at);
 				at.trip.transitionTo(TripPhase.ARRIVING, tick);
+				EventLog.event("trip.arriving")
+						.tick(tick)
+						.trip(at.trip.id())
+						.field("player", player.getPlainTextName())
+						.field("dock", at.plan.toDock())
+						.info(logger);
 				finishArrival(at, player, tick);
 				return;
 			}
@@ -800,6 +913,7 @@ public final class TripService {
 	private void finishArrival(ActiveTrip at, ServerPlayer player, long tick) {
 		GraphRoutePlan plan = at.plan;
 		if (player.getVehicle() != at.cart) {
+			logDetach(at, player, tick);
 			discardAndRemove(at);
 			notifyAborted(player);
 			return;
@@ -829,6 +943,20 @@ public final class TripService {
 		PlayerActions.dismountTo(player, at.world.level(), target, at.arrivalYaw);
 		boolean removed = PlayerActions.discardCart(at.cart);
 		at.trip.transitionTo(TripPhase.COMPLETED, tick);
+		EventLog.event("trip.complete")
+				.tick(tick)
+				.trip(at.trip.id())
+				.field("player", player.getPlainTextName())
+				.field("from", plan.from().value())
+				.field("fromName", stationName(plan.from()))
+				.field("to", plan.to().value())
+				.field("toName", stationName(plan.to()))
+				.field("dim", plan.dimension())
+				.field("durationTicks", tick - at.trip.startedTick())
+				.field("dock", plan.toDock())
+				.field("exit", at.arrivalExit)
+				.field("cartRemoved", Boolean.toString(removed))
+				.info(logger);
 		if (removed) {
 			removeTrip(at);
 		} else {
@@ -843,8 +971,6 @@ public final class TripService {
 			at.arrivalWaitSinceTick = tick;
 		}
 		if (tick - at.arrivalWaitSinceTick > CHUNK_READY_WAIT_TICKS) {
-			logger.warn("Trip {} arrival target {} unusable: {}", at.trip.id(),
-					target.shortString(), code);
 			abort(at, tick, Failure.at(code, target));
 			return;
 		}
@@ -854,6 +980,7 @@ public final class TripService {
 
 	private void retrySafeExit(ActiveTrip at, ServerPlayer player, long tick) {
 		if (player.getVehicle() != at.cart) {
+			logDetach(at, player, tick);
 			discardAndRemove(at);
 			notifyAborted(player);
 			return;
@@ -890,11 +1017,26 @@ public final class TripService {
 		if (trip.phase().isTerminal()) {
 			return;
 		}
-		logger.info("Trip {} aborting: {} {}", trip.id(), failure.code(),
-				failure.location() == null ? "" : failure.location().shortString());
+		GraphRoutePlan plan = at.plan;
+		ServerPlayer player = railway.server().getPlayerList().getPlayer(trip.playerUuid());
+		EventLog.event("trip.abort")
+				.tick(tick)
+				.trip(trip.id())
+				.field("player", player == null ? trip.playerUuid().toString() : player.getPlainTextName())
+				.field("playerId", trip.playerUuid())
+				.phase(trip.phase())
+				.field("from", plan.from().value())
+				.field("fromName", stationName(plan.from()))
+				.field("to", plan.to().value())
+				.field("toName", stationName(plan.to()))
+				.field("dim", plan.dimension())
+				.field("steps", plan.steps().size())
+				.field("cart", RailWorld.loc(at.cart.blockPosition()))
+				.field("speed", String.format(Locale.ROOT, "%.2f", at.speed))
+				.failure(failure)
+				.warn(logger);
 		at.cart.setDeltaMovement(Vec3.ZERO);
 		at.speed = 0;
-		ServerPlayer player = railway.server().getPlayerList().getPlayer(trip.playerUuid());
 
 		if (player != null && player.getVehicle() == at.cart) {
 			Optional<BlockLocation> safe = at.world.findSafeSpot(RailWorld.loc(at.cart.blockPosition()), 3);

@@ -16,7 +16,7 @@ carts, routing, reservations, recovery, and diagnostics.
 - Java: **25+**
 - License: **MIT**
 
-Current version: `0.1.0-alpha.7`. This is an alpha build. Test on a backup
+Current version: `0.1.0-alpha.8`. This is an alpha build. Test on a backup
 world before using it on a world you care about.
 
 ## Status
@@ -31,7 +31,8 @@ Implemented and tested through Stage 5 operations:
 - per-origin arrival platforms configured with `/rail station arrival set`;
 - bounded local chunk tickets and readiness gates;
 - crash-recovery checkpoints and late-chunk reconciliation;
-- `/rail diagnostics`.
+- `/rail diagnostics` and a persistent failure journal (`/rail diagnostics failures`,
+  `/rail diagnostics ref <ref>`).
 
 See [`docs/stage-5-report.md`](docs/stage-5-report.md) for the historical Stage 5
 verification snapshot; current acceptance gates live in [`TODO.md`](TODO.md).
@@ -39,7 +40,7 @@ verification snapshot; current acceptance gates live in [`TODO.md`](TODO.md).
 ## Install
 
 1. Create or use a Fabric **server** with the versions above.
-2. Put `railway-0.1.0-alpha.7.jar` and the matching Fabric API in the server
+2. Put `railway-0.1.0-alpha.8.jar` and the matching Fabric API in the server
    `mods/` directory.
 3. Start the server once. Railway creates `config/railway.json`.
 4. Adjust the config if needed, then `/rail reload` or restart.
@@ -52,7 +53,7 @@ To build from source:
 
 ```bash
 ./gradlew build
-# server jar: build/libs/railway-0.1.0-alpha.7.jar
+# server jar: build/libs/railway-0.1.0-alpha.8.jar
 ```
 
 Alpha release pipeline and Modrinth setup: [`docs/release.md`](docs/release.md).
@@ -144,11 +145,14 @@ registered button.
 /rail station remove <id>
 /rail button bind|info|unbind
 /rail network scan <station>
+/rail network rescan
 /rail network status [station]
 /rail route check <from> <to>
 /rail trip list
 /rail trip abort <tripId>
 /rail diagnostics [station]
+/rail diagnostics failures [count]
+/rail diagnostics ref <ref>
 /rail reload
 ```
 
