@@ -1,6 +1,6 @@
 # Railway production TODO
 
-Last updated: 2026-11-08. Current alpha: `0.1.0-alpha.8`.
+Last updated: 2026-11-08. Current alpha: `0.1.0-alpha.9`.
 
 ## Verified
 
@@ -15,9 +15,12 @@ Last updated: 2026-11-08. Current alpha: `0.1.0-alpha.8`.
 - [x] `/rail network rescan`: drops all cached graphs and re-analyzes every
   component once, one scan at a time; rejects while a startup/rescan queue is
   running.
+- [x] Removing an anchor/main sign promotes the nearest remaining unit to main
+  (with a safe exit and rescan); if none can be promoted, the station is disabled
+  and an `m` on any sign re-enables it.
 
 - [x] Unit tests: 272 passing.
-- [x] GameTests: 67 passing.
+- [x] GameTests: 70 passing.
 - [x] Per-origin arrival platforms (`/rail station arrival set/remove`) with main-arrival fallback; schema 5 migration; GameTest coverage for two origins and fallback.
 - [x] Dev fixtures live in `src/dev`; `jar`/`sourcesJar` exclude them and CI plus `build-alpha.sh` assert absence.
 - [x] Automatic startup scans, one scan per connected component.
@@ -35,7 +38,7 @@ Last updated: 2026-11-08. Current alpha: `0.1.0-alpha.8`.
 - [x] `/rail route check` rejects disabled source/destination stations.
 - [x] Alpha icon, 16:9 banner, changelog, and automatic Modrinth release pipeline.
 - [x] Alpha.6 published to Modrinth and tagged `v0.1.0-alpha.6`.
-- [x] Alpha.8 logging/journal/rescan release published by the automated workflow on 2026-11-08 and tagged `v0.1.0-alpha.8`.
+- [x] Alpha.9 sign-main recovery release published by the automated workflow on 2026-11-08 and tagged `v0.1.0-alpha.9`.
 - [x] Standalone server booted from downloaded Modrinth jars (alpha.1), then updated through alpha.5 local builds.
 
 ## Modrinth page — finish manually
@@ -44,7 +47,7 @@ Last updated: 2026-11-08. Current alpha: `0.1.0-alpha.8`.
 - [ ] Confirm `docs/assets/railway-alpha-banner.png` is in the gallery.
 - [ ] Paste or sync `docs/modrinth-description.md` as the project body.
 - [ ] Confirm the live version is type `alpha`, loader `fabric`, environment `server_only`, game `26.1.2`.
-- [ ] Download the published alpha.8 jar and start it on a fresh copy server.
+- [ ] Download the published alpha.9 jar and start it on a fresh copy server.
 - [ ] Check the gallery screenshots/video.
 
 ## Remaining P0 checks
@@ -54,7 +57,7 @@ Last updated: 2026-11-08. Current alpha: `0.1.0-alpha.8`.
 - [x] **Corrupt-state drill:** truncated `state.json` disabled Railway without overwriting it; the missing-backup path left the file untouched; schema 4 → 5 created a byte-identical `state.v4.bak` and migrated stations to schema 5 with empty arrival platforms.
 - [ ] **Failed save/disk conditions:** simulate an unwritable state directory or a save error and confirm Railway logs the failure without corrupting the previous file.
 - [ ] **Final removal:** remove Railway from a copied world and load it with vanilla; no orphan entities or required custom blocks.
-- [ ] **Copied real-world test:** install alpha.8 on a copy of the production world, build one low-risk two-station route, and run passenger/return/restart cycles.
+- [ ] **Copied real-world test:** install alpha.9 on a copy of the production world, build one low-risk two-station route, and run passenger/return/restart cycles.
 - [ ] **Soak test:** leave the copied-world server running for 24 hours with several trips; watch TPS, logs, tickets, and diagnostics.
 
 ## Before beta/stable

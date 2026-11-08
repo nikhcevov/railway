@@ -210,7 +210,21 @@ public final class SignRegistrationService {
 		}
 		BlockLocation dock = ((DockResolution.Found) resolution).dock();
 
-		if (!anchorMode) {
+		// A station disabled by destroying its last sign has no units left. The
+		// restoring sign then defines the station again, including its arrival point.
+		boolean restoreDisabled = !anchorMode && !from.enabled()
+				&& state.signMarkersForStation(from.id()).isEmpty();
+		// A station disabled because its main unit disappeared can be re-enabled by
+		// explicitly assigning a new main with the m flag. An admin-disabled station
+		// still has its main marker, so this does not override that decision.
+		boolean restoreMissingMain = !anchorMode && !from.enabled() && parsed.main()
+				&& state.mainMarkerForStation(from.id()).isEmpty();
+		// A unit that redefines the station main may live on a new component: the old
+		// graph cannot contain its dock yet, and the post-registration rescan from the
+		// new main is what makes it authoritative.
+		boolean redefinesMain = parsed.main() || restoreDisabled || restoreMissingMain;
+
+		if (!anchorMode && !redefinesMain) {
 			Failure chainFailure = chainedUnitFailure(state, from, signLocation, support, dock, marker);
 			if (chainFailure != null) {
 				return reject(player, sign, front, previous, marker, chainFailure);
@@ -286,11 +300,6 @@ public final class SignRegistrationService {
 			}
 		}
 
-		// A station disabled by destroying its last sign has no units left. The
-		// restoring sign then defines the station again, including its arrival point.
-		boolean restoreDisabled = !anchorMode && !from.enabled()
-				&& state.signMarkersForStation(from.id()).isEmpty();
-
 		BlockLocation exit = null;
 		if (anchorMode || parsed.main() || restoreDisabled) {
 			exit = selectExit(level, railWorld, player, dock);
@@ -326,15 +335,16 @@ public final class SignRegistrationService {
 						&& (!java.util.Objects.equals(from.dock(), dock)
 						|| !java.util.Objects.equals(from.exit(), exit)
 						|| Float.compare(from.exitYaw(), player.getYRot()) != 0);
-				if (restoreDisabled || moveMain) {
+				if (restoreDisabled || restoreMissingMain || moveMain) {
 					long revision = state.nextRevision();
-					Station updated = restoreDisabled ? from.withEnabled(true, revision) : from;
+					Station updated = restoreDisabled || restoreMissingMain
+							? from.withEnabled(true, revision) : from;
 					if (moveMain) {
 						updated = updated.withMain(dock, exit, player.getYRot(), revision);
 					}
 					stationFrom = updated;
 					state.updateStation(updated);
-					reactivated = restoreDisabled;
+					reactivated = restoreDisabled || restoreMissingMain;
 					mainMoved = moveMain;
 				} else {
 					stationFrom = from;
@@ -691,11 +701,12 @@ public final class SignRegistrationService {
 				continue;
 			}
 			if (!signStillValid(level, marker)) {
-				changed |= breakSignMarker(worldState, marker.dimension(), marker, handledSigns);
+				changed |= breakSignMarker(worldState, level, marker.dimension(), marker, handledSigns, null);
 				continue;
 			}
 			if (marker.button() != null && !buttonStillValid(level, marker)) {
-				changed |= breakButtonSide(worldState, marker.dimension(), marker.button(), marker, handledSigns);
+				changed |= breakButtonSide(worldState, level, marker.dimension(), marker.button(), marker,
+						handledSigns, null);
 			}
 		}
 		if (changed) {
@@ -745,7 +756,8 @@ public final class SignRegistrationService {
 		return attached.x() == marker.support().x() && attached.z() == marker.support().z();
 	}
 
-	public void onBlockBreak(ServerLevel level, BlockPos pos, BlockState state, BlockEntity entity) {
+	public void onBlockBreak(ServerLevel level, BlockPos pos, BlockState state, BlockEntity entity,
+			ServerPlayer player) {
 		if (railway.disabled()) {
 			return;
 		}
@@ -757,12 +769,12 @@ public final class SignRegistrationService {
 
 		SignMarker markerAtSign = worldState.signMarker(dimension, broken).orElse(null);
 		if (markerAtSign != null) {
-			changed |= breakSignMarker(worldState, dimension, markerAtSign, handledSigns);
+			changed |= breakSignMarker(worldState, level, dimension, markerAtSign, handledSigns, player);
 		}
 
 		if (state.getBlock() instanceof ButtonBlock) {
 			SignMarker marker = worldState.signMarkerForButton(dimension, broken).orElse(null);
-			changed |= breakButtonSide(worldState, dimension, broken, marker, handledSigns);
+			changed |= breakButtonSide(worldState, level, dimension, broken, marker, handledSigns, player);
 		}
 
 		for (SignMarker marker : List.copyOf(worldState.signMarkers())) {
@@ -773,9 +785,9 @@ public final class SignRegistrationService {
 				continue;
 			}
 			if (marker.support().equals(broken)) {
-				changed |= breakSignMarker(worldState, dimension, marker, handledSigns);
+				changed |= breakSignMarker(worldState, level, dimension, marker, handledSigns, player);
 			} else if (marker.button() != null && buttonSupport(marker).equals(broken)) {
-				changed |= breakButtonSide(worldState, dimension, marker.button(), marker, handledSigns);
+				changed |= breakButtonSide(worldState, level, dimension, marker.button(), marker, handledSigns, player);
 			}
 		}
 
@@ -786,9 +798,11 @@ public final class SignRegistrationService {
 
 	private boolean breakSignMarker(
 			WorldState state,
+			ServerLevel level,
 			String dimension,
 			SignMarker marker,
-			Set<String> handledSigns
+			Set<String> handledSigns,
+			ServerPlayer player
 	) {
 		if (!handledSigns.add(WorldState.signMarkerKey(marker.dimension(), marker.sign()))) {
 			return false;
@@ -797,42 +811,70 @@ public final class SignRegistrationService {
 		if (marker.button() != null) {
 			changed |= state.removeBinding(dimension, marker.button()).isPresent();
 		}
-		Station anchor = marker.anchorStationId() == null
-				? null : state.station(marker.anchorStationId()).orElse(null);
+		StationId ownerId = marker.anchorStationId() != null
+				? marker.anchorStationId() : marker.stationId();
 		boolean disabled = false;
-		if (anchor != null && anchor.isAnchored() && anchor.enabled()
-				&& !state.hasOtherSignMarkers(anchor.id(), dimension, marker.sign())) {
-			// The last unit is gone: disable the station but keep its data. With
-			// other units left the station stays enabled and keeps its main.
-			state.updateStation(anchor.withEnabled(false, state.nextRevision()));
-			disabled = true;
-			changed = true;
+		if (changed && ownerId != null) {
+			if (state.signMarkersForStation(ownerId).isEmpty()) {
+				// No units left: this is terminal. The station keeps its data for a
+				// later restore; there is no sign to carry an m flag.
+				disabled = disableForNoUnits(state, player, ownerId, marker);
+			} else if (marker.main() || marker.anchorStationId() != null) {
+				replaceMissingMain(state, level, player, ownerId, marker);
+			}
 		}
 		if (changed) {
-			StationId logStationId = marker.anchorStationId() != null
-					? marker.anchorStationId() : marker.stationId();
-			Station logStation = anchor != null ? anchor
-					: logStationId == null ? null : state.station(logStationId).orElse(null);
+			Station logStation = ownerId == null ? null : state.station(ownerId).orElse(null);
 			EventLog log = EventLog.event("sign.marker.remove")
 					.field("pos", marker.sign())
 					.field("dim", dimension)
 					.field("disabled", Boolean.toString(disabled));
 			if (logStation != null) {
 				log.station(logStation.id(), logStation.displayName());
-			} else if (logStationId != null) {
-				log.field("station", logStationId.value());
+			} else if (ownerId != null) {
+				log.field("station", ownerId.value());
 			}
 			log.info(logger);
 		}
 		return changed;
 	}
 
+	/**
+	 * The last sign unit is gone. Disable the station (if enabled) and tell the
+	 * breaker how to restore it; there is no sign left on which to set {@code m}.
+	 */
+	private boolean disableForNoUnits(WorldState state, ServerPlayer player, StationId stationId,
+			SignMarker removed) {
+		Station station = state.station(stationId).orElse(null);
+		if (station == null) {
+			return false;
+		}
+		boolean disabled = false;
+		if (station.enabled()) {
+			state.updateStation(station.withEnabled(false, state.nextRevision()));
+			disabled = true;
+		}
+		railway.scans().invalidate(stationId);
+		EventLog.event("sign.last_unit.remove")
+				.station(station.id(), station.displayName())
+				.field("pos", removed.sign())
+				.field("units", 0)
+				.field("disabled", Boolean.toString(disabled))
+				.info(logger);
+		if (player != null) {
+			player.sendSystemMessage(Messages.text(player, "sign.station_disabled", station.displayName()));
+		}
+		return disabled;
+	}
+
 	private boolean breakButtonSide(
 			WorldState state,
+			ServerLevel level,
 			String dimension,
 			BlockLocation button,
 			SignMarker marker,
-			Set<String> handledSigns
+			Set<String> handledSigns,
+			ServerPlayer player
 	) {
 		boolean bindingRemoved = state.removeBinding(dimension, button).isPresent();
 		if (marker == null) {
@@ -851,10 +893,131 @@ public final class SignRegistrationService {
 			state.updateSignMarker(marker.withButton(null));
 		} else {
 			state.removeSignMarker(dimension, marker.sign());
+			if (stationId != null) {
+				if (state.signMarkersForStation(stationId).isEmpty()) {
+					disableForNoUnits(state, player, stationId, marker);
+				} else if (marker.main()) {
+					replaceMissingMain(state, level, player, stationId, marker);
+				}
+			}
 		}
 		logButtonRemoval(dimension, button, stationId, station, bindingRemoved);
 		return true;
 	}
+
+	/**
+	 * A removed anchor or main unit must never leave the station pointing at a dead
+	 * dock. Promote the nearest remaining unit that still has a resolvable dock and a
+	 * safe exit; if none exists, disable the station and ask for an explicit main.
+	 */
+	private void replaceMissingMain(WorldState state, ServerLevel level, ServerPlayer player,
+			StationId stationId, SignMarker removed) {
+		Station station = state.station(stationId).orElse(null);
+		if (station == null || !station.enabled() || station.dock() == null
+				|| state.mainMarkerForStation(stationId).isPresent()) {
+			return;
+		}
+		MainCandidate candidate = findMainCandidate(state, level, station);
+		String cause = removed.main() ? "main_removed" : "anchor_removed";
+		if (candidate != null) {
+			BlockLocation oldDock = station.dock();
+			float yaw = yawAway(candidate.dock(), candidate.exit());
+			Station updated = station.withMain(candidate.dock(), candidate.exit(), yaw,
+					state.nextRevision());
+			state.updateStation(updated);
+			state.updateSignMarker(candidate.marker().withMain(true));
+			EventLog.event("sign.main.promoted")
+					.field("station", updated.id().value())
+					.field("name", updated.displayName())
+					.field("from", oldDock)
+					.field("to", candidate.dock())
+					.field("unit", candidate.marker().sign())
+					.field("cause", cause)
+					.info(logger);
+			if (player != null) {
+				player.sendSystemMessage(Messages.text(player, "sign.main_moved",
+						updated.displayName(), candidate.dock().shortString()));
+			}
+			refreshConnectedScans(updated, null);
+			return;
+		}
+		state.updateStation(station.withEnabled(false, state.nextRevision()));
+		railway.scans().invalidate(stationId);
+		EventLog.event("sign.main.missing")
+				.field("station", station.id().value())
+				.field("name", station.displayName())
+				.field("units", state.signUnitCount(stationId))
+				.field("cause", cause)
+				.warn(logger);
+		if (player != null) {
+			player.sendSystemMessage(Messages.text(player, "sign.main_missing", station.displayName()));
+		}
+	}
+
+	private record MainCandidate(SignMarker marker, BlockLocation dock, BlockLocation exit) {
+	}
+
+	private MainCandidate findMainCandidate(WorldState state, ServerLevel level, Station station) {
+		RailWorld world = new RailWorld(level);
+		MainCandidate best = null;
+		long bestDistance = Long.MAX_VALUE;
+		for (SignMarker marker : state.signMarkersForStation(station.id())) {
+			if (!marker.dimension().equals(station.dimension())) {
+				continue;
+			}
+			BlockLocation dock = unitDock(state, level, marker, station);
+			if (dock == null) {
+				continue;
+			}
+			BlockLocation exit = findSafeExit(level, world, dock).orElse(null);
+			if (exit == null) {
+				continue;
+			}
+			long distance = distanceSquared(station.dock(), dock);
+			if (best == null || distance < bestDistance
+					|| (distance == bestDistance
+					&& BlockLocation.POSITION_ORDER.compare(marker.sign(), best.marker().sign()) < 0)) {
+				best = new MainCandidate(marker, dock, exit);
+				bestDistance = distance;
+			}
+		}
+		return best;
+	}
+
+	private BlockLocation unitDock(WorldState state, ServerLevel level, SignMarker marker, Station station) {
+		if (marker.button() != null) {
+			Binding binding = state.binding(station.dimension(), marker.button()).orElse(null);
+			if (binding != null && binding.hasSourceDock()
+					&& station.id().equals(binding.fromStationId())) {
+				return binding.sourceDock();
+			}
+		}
+		BlockState signState = level.getBlockState(RailWorld.pos(marker.sign()));
+		if (!(signState.getBlock() instanceof WallSignBlock)) {
+			return null;
+		}
+		Direction facing = signState.getValue(WallSignBlock.FACING);
+		HorizontalAxis axis = facing.getAxis() == Direction.Axis.X ? HorizontalAxis.X : HorizontalAxis.Z;
+		DockResolution resolution = PillarGeometry.resolveDock(marker.sign(), axis, blockView(level));
+		return resolution instanceof DockResolution.Found found ? found.dock() : null;
+	}
+
+	private static long distanceSquared(BlockLocation from, BlockLocation to) {
+		long dx = (long) from.x() - to.x();
+		long dy = (long) from.y() - to.y();
+		long dz = (long) from.z() - to.z();
+		return dx * dx + dy * dy + dz * dz;
+	}
+
+	private static float yawAway(BlockLocation dock, BlockLocation exit) {
+		int dx = exit.x() - dock.x();
+		int dz = exit.z() - dock.z();
+		if (dx == 0 && dz == 0) {
+			return 0.0F;
+		}
+		return (float) Math.toDegrees(Math.atan2(-dx, dz));
+	}
+
 
 	private void logButtonRemoval(
 			String dimension,

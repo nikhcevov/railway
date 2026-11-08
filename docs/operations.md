@@ -265,6 +265,8 @@ Events to grep for:
 | `trip.start`, `trip.reject`, `trip.depart`, `trip.arriving`, `trip.complete`, `trip.detach`, `trip.end`, `trip.timeout` | INFO/WARN | Trip lifecycle |
 | `trip.abort`, `trip.tick.error` | WARN/ERROR | Abort with failure code/detail/ref and a stack trace when an exception caused it |
 | `sign.register`, `sign.reject`, `sign.marker.remove`, `sign.button.remove` | INFO/WARN | Sign registration and marker invalidation, including rejected edits |
+| `sign.main.promoted`, `sign.main.missing` | INFO/WARN | A removed anchor/main promoted the nearest remaining unit, or no unit could become main and the station was disabled |
+| `sign.last_unit.remove` | INFO | The last sign unit disappeared; the station is disabled and keeps its data for restore |
 | `config.reload.reject` | WARN | Invalid config on `/rail reload` |
 
 To investigate a player report, search the log for the player name, the station

@@ -16,7 +16,7 @@ carts, routing, reservations, recovery, and diagnostics.
 - Java: **25+**
 - License: **MIT**
 
-Current version: `0.1.0-alpha.8`. This is an alpha build. Test on a backup
+Current version: `0.1.0-alpha.9`. This is an alpha build. Test on a backup
 world before using it on a world you care about.
 
 ## Status
@@ -40,7 +40,7 @@ verification snapshot; current acceptance gates live in [`TODO.md`](TODO.md).
 ## Install
 
 1. Create or use a Fabric **server** with the versions above.
-2. Put `railway-0.1.0-alpha.8.jar` and the matching Fabric API in the server
+2. Put `railway-0.1.0-alpha.9.jar` and the matching Fabric API in the server
    `mods/` directory.
 3. Start the server once. Railway creates `config/railway.json`.
 4. Adjust the config if needed, then `/rail reload` or restart.
@@ -53,7 +53,7 @@ To build from source:
 
 ```bash
 ./gradlew build
-# server jar: build/libs/railway-0.1.0-alpha.8.jar
+# server jar: build/libs/railway-0.1.0-alpha.9.jar
 ```
 
 Alpha release pipeline and Modrinth setup: [`docs/release.md`](docs/release.md).

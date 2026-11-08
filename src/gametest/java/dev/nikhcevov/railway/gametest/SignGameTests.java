@@ -672,7 +672,6 @@ public final class SignGameTests extends GameTestSupport {
 		clearRegistration(fixture, mainSign, mainButton);
 		saveSignWithFlags(fixture, mainSign, fixture.player(), fixture.homeName(), fixture.mineName(), "m");
 		BlockLocation mainDock = absolute(helper, DEST_SIGN_X, DOCK_Y, Z_RAIL);
-		BlockLocation mainExit = state(fixture).station(home.id()).orElseThrow().exit();
 		check(helper, mainDock.equals(state(fixture).station(home.id()).orElseThrow().dock()),
 				"m did not move main before the break");
 
@@ -681,10 +680,12 @@ public final class SignGameTests extends GameTestSupport {
 		Station afterMainBreak = state(fixture).station(home.id()).orElse(null);
 		check(helper, afterMainBreak != null, "station disappeared with the main sign");
 		check(helper, afterMainBreak.enabled(), "station was disabled by breaking a non-anchor main sign");
-		check(helper, mainDock.equals(afterMainBreak.dock()), "station main dock was lost");
-		check(helper, mainExit.equals(afterMainBreak.exit()), "station main exit was lost");
-		check(helper, state(fixture).mainMarkerForStation(home.id()).isEmpty(),
-				"main flag survived the sign break");
+		check(helper, fixture.homeDock().equals(afterMainBreak.dock()),
+				"station main did not move to the remaining anchor: " + afterMainBreak.dock());
+		check(helper, afterMainBreak.hasExit(), "promoted station main has no exit");
+		SignMarker promoted = state(fixture).mainMarkerForStation(home.id()).orElse(null);
+		check(helper, promoted != null && promoted.sign().equals(homeSign),
+				"remaining anchor did not become the main marker: " + promoted);
 		check(helper, state(fixture).signMarker(fixture.dimension(), homeSign).isPresent(),
 				"anchor unit was removed with the main sign");
 		check(helper, state(fixture).signUnitCount(home.id()) == 1, "unexpected unit count after main break");
@@ -694,8 +695,9 @@ public final class SignGameTests extends GameTestSupport {
 		Station afterAnchorBreak = state(fixture).station(home.id()).orElse(null);
 		check(helper, afterAnchorBreak != null, "station was removed with its last sign");
 		check(helper, !afterAnchorBreak.enabled(), "station was not disabled with its last unit");
-		check(helper, mainDock.equals(afterAnchorBreak.dock()), "station main dock was lost with the last unit");
-		check(helper, mainExit.equals(afterAnchorBreak.exit()), "station main exit was lost with the last unit");
+		check(helper, fixture.homeDock().equals(afterAnchorBreak.dock()),
+				"station main dock was lost with the last unit");
+		check(helper, afterAnchorBreak.hasExit(), "station main exit was lost with the last unit");
 		check(helper, state(fixture).signUnitCount(home.id()) == 0, "last unit left a marker");
 		helper.succeed();
 	}
@@ -886,7 +888,6 @@ public final class SignGameTests extends GameTestSupport {
 		clearRegistration(fixture, mainSign, mainButton);
 		saveSignWithFlags(fixture, mainSign, mover, fixture.homeName(), fixture.mineName(), "m");
 		BlockLocation mainDock = absolute(helper, DEST_SIGN_X, DOCK_Y, Z_RAIL);
-		BlockLocation mainExit = absolute(helper, DEST_SIGN_X, DOCK_Y, Z_EXIT);
 		check(helper, mainDock.equals(state(fixture).station(home.id()).orElseThrow().dock()),
 				"m did not move main before verification");
 		check(helper, state(fixture).signUnitCount(home.id()) == 2, "unexpected unit count");
@@ -896,12 +897,15 @@ public final class SignGameTests extends GameTestSupport {
 
 		SignMarker anchor = state(fixture).signMarker(fixture.dimension(), homeSign).orElse(null);
 		check(helper, anchor != null, "anchor unit was removed with the main sign");
-		check(helper, state(fixture).mainMarkerForStation(home.id()).isEmpty(),
-				"main flag survived the removed main sign");
+		SignMarker promoted = state(fixture).mainMarkerForStation(home.id()).orElse(null);
+		check(helper, promoted != null && promoted.sign().equals(homeSign),
+				"remaining anchor did not become the main marker: " + promoted);
 		Station afterMain = state(fixture).station(home.id()).orElseThrow();
 		check(helper, afterMain.enabled(), "station was disabled while another unit remained");
-		check(helper, mainDock.equals(afterMain.dock()) && mainExit.equals(afterMain.exit()),
-				"stored main dock/exit changed when the main unit was removed");
+		check(helper, fixture.homeDock().equals(afterMain.dock()),
+				"main did not move back to the anchor dock: " + afterMain.dock());
+		check(helper, afterMain.hasExit(),
+				"promoted main has no safe exit");
 
 		fixture.level().setBlock(RailWorld.pos(homeSign), Blocks.AIR.defaultBlockState(), 3);
 		fixture.railway().signs().verifyMarkers(fixture.server());
@@ -910,8 +914,127 @@ public final class SignGameTests extends GameTestSupport {
 		check(helper, afterLast != null, "station data was removed with its last sign");
 		check(helper, state(fixture).signUnitCount(home.id()) == 0, "marker left after last unit removal");
 		check(helper, !afterLast.enabled(), "station was not disabled after its last unit disappeared");
-		check(helper, mainDock.equals(afterLast.dock()) && mainExit.equals(afterLast.exit()),
-				"station main dock/exit was lost with its last unit");
+		check(helper, fixture.homeDock().equals(afterLast.dock()), "station main dock was lost with its last unit");
+		check(helper, afterLast.hasExit(), "station main exit was lost with its last unit");
+		helper.succeed();
+	}
+
+	/**
+	 * Removing the anchor while a destination unit remains must move the station
+	 * main to that unit instead of leaving it on the demolished dock.
+	 */
+	@GameTest(maxTicks = 200)
+	public void removingAnchorPromotesRemainingUnitToMain(GameTestHelper helper) {
+		Fixture fixture = buildFixture(helper);
+		BlockLocation anchor = placeWallSign(helper, HOME_X, 3, Z_SIGN, Direction.NORTH);
+		clearRegistration(fixture, anchor, absolute(helper, HOME_X, 2, Z_SIGN));
+		saveSign(fixture, anchor, fixture.player(), fixture.homeName(), "");
+		Station home = station(helper, fixture, fixture.homeName());
+
+		buildPillar(helper, DEST_SIGN_X, DEST_SUPPORT_Z);
+		buildExitPlatform(helper, DEST_SIGN_X, Z_EXIT);
+		BlockLocation unitSign = placeWallSign(helper, DEST_SIGN_X, 3, Z_SIGN, Direction.NORTH);
+		BlockLocation unitButton = placeWallButton(helper, DEST_SIGN_X, 2, Z_SIGN, Direction.NORTH);
+		clearRegistration(fixture, unitSign, unitButton);
+		ServerPlayer mover = opPlayer(helper, fixture, absolute(helper, DEST_SIGN_X, DOCK_Y, Z_EXIT));
+		saveSign(fixture, unitSign, mover, fixture.homeName(), fixture.mineName());
+		BlockLocation unitDock = absolute(helper, DEST_SIGN_X, DOCK_Y, Z_RAIL);
+		check(helper, fixture.homeDock().equals(state(fixture).station(home.id()).orElseThrow().dock()),
+				"anchor dock was not main before anchor removal");
+
+		breakBlockThroughService(fixture, anchor);
+
+		Station after = state(fixture).station(home.id()).orElseThrow();
+		check(helper, after.enabled(), "station was disabled while a unit remained");
+		check(helper, unitDock.equals(after.dock()), "remaining unit did not become main: " + after.dock());
+		check(helper, after.hasExit(), "promoted main has no safe exit");
+		SignMarker mainMarker = state(fixture).mainMarkerForStation(home.id()).orElse(null);
+		check(helper, mainMarker != null && mainMarker.sign().equals(unitSign),
+				"promoted unit was not marked as main: " + mainMarker);
+		Binding binding = state(fixture).binding(fixture.dimension(), unitButton).orElse(null);
+		check(helper, binding != null && unitDock.equals(binding.sourceDock()),
+				"binding was lost or lost its local dock after anchor removal");
+
+		breakBlockThroughService(fixture, unitSign);
+		Station last = state(fixture).station(home.id()).orElseThrow();
+		check(helper, !last.enabled(), "station was not disabled after its last unit");
+		check(helper, state(fixture).signUnitCount(home.id()) == 0, "last unit left a marker");
+		check(helper, unitDock.equals(last.dock()), "station main dock was lost with its last unit");
+		check(helper, last.hasExit(), "station main exit was lost with its last unit");
+		helper.succeed();
+	}
+
+	/**
+	 * A sign with m may move main onto a component that the old station graph does
+	 * not contain: the local-dock-on-station-graph check must not block the move,
+	 * because the post-registration rescan from the new main is authoritative.
+	 */
+	@GameTest(maxTicks = 300)
+	public void mainFlagMovesToDockOutsideCurrentStationGraph(GameTestHelper helper) {
+		Fixture fixture = buildFixture(helper);
+		helper.setBlock(new BlockPos(4, DOCK_Y, Z_RAIL), Blocks.AIR);
+		BlockLocation anchor = placeWallSign(helper, HOME_X, 3, Z_SIGN, Direction.NORTH);
+		clearRegistration(fixture, anchor, absolute(helper, HOME_X, 2, Z_SIGN));
+		saveSign(fixture, anchor, fixture.player(), fixture.homeName(), "");
+		Station home = station(helper, fixture, fixture.homeName());
+		finishScan(fixture, helper, home);
+
+		buildPillar(helper, 5, DEST_SUPPORT_Z);
+		buildExitPlatform(helper, 5, Z_EXIT);
+		BlockLocation unitSign = placeWallSign(helper, 5, 3, Z_SIGN, Direction.NORTH);
+		BlockLocation unitButton = placeWallButton(helper, 5, 2, Z_SIGN, Direction.NORTH);
+		clearRegistration(fixture, unitSign, unitButton);
+		BlockLocation unitDock = absolute(helper, 5, DOCK_Y, Z_RAIL);
+		ServerPlayer mover = opPlayer(helper, fixture, absolute(helper, 5, DOCK_Y, Z_EXIT));
+		saveSignWithFlags(fixture, unitSign, mover, fixture.homeName(), fixture.mineName(), "m");
+
+		SignMarker marker = state(fixture).signMarker(fixture.dimension(), unitSign).orElse(null);
+		check(helper, marker != null, "sign with m was rejected when its dock was off the old graph");
+		Station after = state(fixture).station(home.id()).orElseThrow();
+		check(helper, unitDock.equals(after.dock()), "main did not move to the off-graph dock: " + after.dock());
+		SignMarker mainMarker = state(fixture).mainMarkerForStation(home.id()).orElse(null);
+		check(helper, mainMarker != null && mainMarker.sign().equals(unitSign),
+				"off-graph main sign was not marked as main: " + mainMarker);
+		Binding binding = state(fixture).binding(fixture.dimension(), unitButton).orElse(null);
+		check(helper, binding != null && unitDock.equals(binding.sourceDock()),
+				"binding for the moved main sign is missing");
+		helper.succeed();
+	}
+
+	/**
+	 * A station disabled with remaining units but no main marker (for example after
+	 * the fallback that could not promote anyone) is re-enabled when a sign is
+	 * saved with an explicit m.
+	 */
+	@GameTest(maxTicks = 200)
+	public void mainFlagReenablesStationDisabledWithoutMain(GameTestHelper helper) {
+		Fixture fixture = buildFixture(helper);
+		BlockLocation anchor = placeWallSign(helper, HOME_X, 3, Z_SIGN, Direction.NORTH);
+		clearRegistration(fixture, anchor, absolute(helper, HOME_X, 2, Z_SIGN));
+		saveSign(fixture, anchor, fixture.player(), fixture.homeName(), "");
+		Station home = station(helper, fixture, fixture.homeName());
+
+		buildPillar(helper, DEST_SIGN_X, DEST_SUPPORT_Z);
+		buildExitPlatform(helper, DEST_SIGN_X, Z_EXIT);
+		BlockLocation unitSign = placeWallSign(helper, DEST_SIGN_X, 3, Z_SIGN, Direction.NORTH);
+		BlockLocation unitButton = placeWallButton(helper, DEST_SIGN_X, 2, Z_SIGN, Direction.NORTH);
+		clearRegistration(fixture, unitSign, unitButton);
+		ServerPlayer mover = opPlayer(helper, fixture, absolute(helper, DEST_SIGN_X, DOCK_Y, Z_EXIT));
+		saveSign(fixture, unitSign, mover, fixture.homeName(), fixture.mineName());
+		BlockLocation unitDock = absolute(helper, DEST_SIGN_X, DOCK_Y, Z_RAIL);
+
+		state(fixture).updateStation(home.withEnabled(false, state(fixture).nextRevision()));
+		check(helper, state(fixture).mainMarkerForStation(home.id()).isEmpty(),
+				"test setup must have no main marker");
+
+		saveSignWithFlags(fixture, unitSign, mover, fixture.homeName(), fixture.mineName(), "m");
+
+		Station after = state(fixture).station(home.id()).orElseThrow();
+		check(helper, after.enabled(), "m did not re-enable the station");
+		check(helper, unitDock.equals(after.dock()), "m did not set the new main dock: " + after.dock());
+		SignMarker mainMarker = state(fixture).mainMarkerForStation(home.id()).orElse(null);
+		check(helper, mainMarker != null && mainMarker.sign().equals(unitSign),
+				"m did not mark the unit as main: " + mainMarker);
 		helper.succeed();
 	}
 
@@ -1187,7 +1310,8 @@ public final class SignGameTests extends GameTestSupport {
 		BlockState state = fixture.level().getBlockState(RailWorld.pos(location));
 		BlockEntity entity = fixture.level().getBlockEntity(RailWorld.pos(location));
 		fixture.level().destroyBlock(RailWorld.pos(location), false);
-		fixture.railway().signs().onBlockBreak(fixture.level(), RailWorld.pos(location), state, entity);
+		fixture.railway().signs().onBlockBreak(fixture.level(), RailWorld.pos(location), state, entity,
+				fixture.player());
 	}
 
 	private static void finishScan(Fixture fixture, GameTestHelper helper, Station station) {

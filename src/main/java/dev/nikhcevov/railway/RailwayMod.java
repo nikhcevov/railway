@@ -67,7 +67,8 @@ public final class RailwayMod implements ModInitializer {
 			if (level instanceof net.minecraft.server.level.ServerLevel serverLevel && Railway.isStarted()) {
 				Railway railway = Railway.get();
 				railway.scans().invalidate(RailWorld.loc(pos));
-				railway.signs().onBlockBreak(serverLevel, pos, state, blockEntity);
+				railway.signs().onBlockBreak(serverLevel, pos, state, blockEntity,
+						player instanceof ServerPlayer serverPlayer ? serverPlayer : null);
 			}
 		});
 		ServerPlayConnectionEvents.JOIN.register((handler, sender, server) -> {

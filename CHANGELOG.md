@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.1.0-alpha.9 — 2026-11-08
+
+- Removing the anchor or main sign no longer leaves the station pointing at the
+  destroyed dock. The nearest remaining unit becomes the station main
+  automatically (local dock plus a safe exit) and its graph is rescanned.
+- A sign carrying `m` can move main to a dock outside the station's current
+  graph; the move is no longer rejected with "local dock is not on the
+  station rail", and the new main triggers a rescan.
+- If no remaining unit can become main, the station is disabled and the breaker
+  is asked to add `m` to one of its signs; saving `m` re-enables the station and
+  sets the new main explicitly.
+- Removing the last sign unit reports that the station is disabled and how to
+  restore it (save a sign with the same name) instead of incorrectly asking for
+  an `m` on a non-existent sign.
+
 ## 0.1.0-alpha.8 — 2026-11-08
 
 - Structured, greppable logging for failures and lifecycle decisions:

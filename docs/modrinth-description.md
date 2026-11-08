@@ -12,7 +12,7 @@ the station exit and the service cart is removed.
 server; no client mod, resource pack, or custom blocks are required.
 
 > **Alpha release.** Test on a backup world. The current version is
-> `0.1.0-alpha.8`.
+> `0.1.0-alpha.9`.
 
 ## Requirements
 
@@ -52,11 +52,15 @@ server; no client mod, resource pack, or custom blocks are required.
 - **Full rescan on demand.** `/rail network rescan` drops every cached graph and
   re-analyzes each connected component once; a server start already performs the
   same full pass.
+- **Predictable main recovery.** Removing a station's anchor or main pillar
+  promotes the nearest remaining sign to main automatically; removing the last
+  sign disables the station but keeps it restorable by saving a sign with the
+  same name. A sign carrying `m` can also move main to a newly built line.
 
 ## Quick start
 
 1. Install Fabric Loader and Fabric API on a Minecraft `26.1.2` server.
-2. Put `railway-0.1.0-alpha.8.jar` in the server `mods/` directory.
+2. Put `railway-0.1.0-alpha.9.jar` in the server `mods/` directory.
 3. Start the server once. Railway creates `config/railway.json`.
 4. Give builders OP level 2, or list their UUIDs in `builders`.
 5. Build a station from vanilla rails, wall signs, and stone buttons.

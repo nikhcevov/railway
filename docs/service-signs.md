@@ -154,18 +154,29 @@ platform applies (below).
 
 - The first anchor initializes main.
 - `m` on any unit moves main to that unit's local dock and selected exit.
+- Moving main may target a dock that is not on the station's current graph
+  (for example a newly built line). The old graph does not block the move;
+  registration triggers a rescan from the new main dock.
 - At most one marker per station may have `m`. A second `m` is rejected with
   `SIGN_MAIN_CONFLICT`; clear the old `m` (edit its line 4 to blank and save) and
   then save the new one.
 - Clearing `m` clears the marker flag but **does not revert main**. Main remains
   at the last designated dock/exit until another `m` moves it.
-- Breaking the main sign does not delete the stored main dock/exit; other units
-  continue and main data remains. Disabling is governed by the anchor-sign rule
-  above.
-- When the last unit is gone, the station is disabled but keeps its data. A sign
-  that restores the station then becomes main without needing `m`, because no
-  other unit remains to define the arrival point. Restoring at a new dock moves
-  main there instead of keeping the old, possibly demolished dock/exit.
+- Breaking the main sign (or the anchor unit) while other units remain does not
+  leave main on a dead dock: the nearest remaining unit becomes main
+  automatically, using its local dock and a safe exit selected near that dock.
+  The promoted unit gets the main flag and a station rescan starts from the new
+  dock. If no remaining unit has a resolvable dock and safe exit, the station is
+  disabled and the breaker is told to add `m` to one of its signs; saving a sign
+  with `m` re-enables the station and sets main explicitly.
+- An admin-disabled station that still has signs stays disabled until explicitly
+  enabled.
+- When the last unit is gone, the station is disabled but keeps its data. The
+  breaker is told that no sign units remain and to save a sign with the same
+  name to restore it; there is no sign on which to set `m`. A restoring sign then
+  becomes main without needing `m`, because no other unit remains to define the
+  arrival point. Restoring at a new dock moves main there instead of keeping the
+  old, possibly demolished dock/exit.
 - A main destination unit still departs from its own local dock.
 
 `m` is checked when the sign is saved. Moving main triggers a station rescan from

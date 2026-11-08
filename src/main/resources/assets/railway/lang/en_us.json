@@ -104,6 +104,8 @@
   "sign.destination": "Destination %s -> %s registered.",
   "sign.updated": "Sign registration is up to date.",
   "sign.main_moved": "Station %s main arrival moved to %s.",
+  "sign.main_missing": "Station %s has no main arrival; add the m flag to one of its signs to choose it.",
+  "sign.station_disabled": "Station %s disabled: no sign units remain. Save a sign with the same name to restore it.",
   "scan.started": "Scan %s started (job %s).",
   "scan.rescan.queued": "Queued %s station(s) for a full rescan; scans run one component at a time.",
   "scan.rescan.none": "No anchored stations are available to rescan.",
