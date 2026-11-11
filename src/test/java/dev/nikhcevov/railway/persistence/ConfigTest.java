@@ -102,6 +102,7 @@ class ConfigTest {
 		assertEquals(4.0, config.acceleration());
 		assertEquals(6.0, config.braking());
 		assertEquals(2.0, config.safetyMargin());
+		assertEquals(32, config.segmentLength());
 		assertEquals(50_000, config.maxRailsPerScan());
 		assertEquals(250, config.scanRailsPerTick());
 		assertEquals(2, config.scanTimeBudgetMs());
@@ -137,6 +138,7 @@ class ConfigTest {
 		assertEquals(defaults.configVersion(), config.configVersion());
 		assertEquals(defaults.boardingDelayTicks(), config.boardingDelayTicks());
 		assertEquals(defaults.maxActiveTrips(), config.maxActiveTrips());
+		assertEquals(defaults.segmentLength(), config.segmentLength());
 		assertEquals(defaults.scanRailsPerTick(), config.scanRailsPerTick());
 		assertEquals(defaults.maxTripTicks(), config.maxTripTicks());
 		assertEquals(List.of(), config.builders(), "a missing builders key defaults to an empty list");
@@ -158,6 +160,26 @@ class ConfigTest {
 		assertTrue(result.errors().stream().anyMatch(error -> error.startsWith("boardingRadius:")),
 				() -> "expected a boardingRadius error, got " + result.errors());
 		assertArrayEquals(original, Files.readAllBytes(file), "invalid config must never be rewritten");
+	}
+
+	@Test
+	void customSegmentLengthLoadsAndValidatesRange() throws IOException {
+		writeConfig("""
+				{
+				  "configVersion": 1,
+				  "segmentLength": 24
+				}
+				""");
+		assertEquals(24, loaded(Config.load(configFile())).config().segmentLength());
+
+		writeConfig("""
+				{
+				  "configVersion": 1,
+				  "segmentLength": 2
+				}
+				""");
+		Config.LoadResult.Invalid tooSmall = invalid(Config.load(configFile()));
+		assertTrue(tooSmall.errors().stream().anyMatch(e -> e.startsWith("segmentLength:")));
 	}
 
 	@Test

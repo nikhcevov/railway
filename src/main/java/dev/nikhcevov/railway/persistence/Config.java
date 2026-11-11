@@ -33,6 +33,7 @@ public record Config(
 		double acceleration,
 		double braking,
 		double safetyMargin,
+		int segmentLength,
 		int maxRailsPerScan,
 		int scanRailsPerTick,
 		int scanTimeBudgetMs,
@@ -45,20 +46,46 @@ public record Config(
 		builders = builders == null ? List.of() : List.copyOf(builders);
 	}
 
+	public Config(
+			int configVersion,
+			int boardingRadius,
+			int boardingDelayTicks,
+			int playerCooldownTicks,
+			int maxActiveTrips,
+			double maxSpeed,
+			double acceleration,
+			double braking,
+			double safetyMargin,
+			int maxRailsPerScan,
+			int scanRailsPerTick,
+			int scanTimeBudgetMs,
+			int maxRouteLength,
+			int maxManagedChunkTickets,
+			int maxTripTicks,
+			List<String> builders
+	) {
+		this(configVersion, boardingRadius, boardingDelayTicks, playerCooldownTicks,
+				maxActiveTrips, maxSpeed, acceleration, braking, safetyMargin,
+				DEFAULT_SEGMENT_LENGTH, maxRailsPerScan, scanRailsPerTick,
+				scanTimeBudgetMs, maxRouteLength, maxManagedChunkTickets,
+				maxTripTicks, builders);
+	}
+
 	public static final int CURRENT_VERSION = 1;
+	public static final int DEFAULT_SEGMENT_LENGTH = 32;
 	/** Stage 3 target and the safe ceiling recognized by the managed-cart mixin. */
 	public static final double TARGET_SPEED_CAP = 12.0;
 
 	private static final Set<String> KNOWN_KEYS = Set.of(
 			"configVersion", "boardingRadius", "boardingDelayTicks", "playerCooldownTicks",
 			"maxActiveTrips", "maxSpeed", "acceleration", "braking", "safetyMargin",
-			"maxRailsPerScan", "scanRailsPerTick", "scanTimeBudgetMs", "maxRouteLength",
-			"maxManagedChunkTickets", "maxTripTicks", "builders"
+			"segmentLength", "maxRailsPerScan", "scanRailsPerTick", "scanTimeBudgetMs",
+			"maxRouteLength", "maxManagedChunkTickets", "maxTripTicks", "builders"
 	);
 
 	public static Config defaults() {
 		return new Config(CURRENT_VERSION, 4, 10, 20, 8, 12.0, 4.0, 6.0, 2.0,
-				50_000, 250, 2, 10_000, 128, 36_000, List.of());
+				DEFAULT_SEGMENT_LENGTH, 50_000, 250, 2, 10_000, 128, 36_000, List.of());
 	}
 
 	public double effectiveSpeed() {
@@ -78,6 +105,7 @@ public record Config(
 		checkDouble(errors, "acceleration", acceleration, 0.1, 20.0);
 		checkDouble(errors, "braking", braking, 0.1, 20.0);
 		checkDouble(errors, "safetyMargin", safetyMargin, 0.0, 10.0);
+		check(errors, "segmentLength", segmentLength, 4, 1_024);
 		check(errors, "maxRailsPerScan", maxRailsPerScan, 1, 1_000_000);
 		check(errors, "scanRailsPerTick", scanRailsPerTick, 1, 10_000);
 		check(errors, "scanTimeBudgetMs", scanTimeBudgetMs, 1, 50);
@@ -173,6 +201,7 @@ public record Config(
 					doubleValue(object, "acceleration", defaults.acceleration()),
 					doubleValue(object, "braking", defaults.braking()),
 					doubleValue(object, "safetyMargin", defaults.safetyMargin()),
+					intValue(object, "segmentLength", defaults.segmentLength()),
 					intValue(object, "maxRailsPerScan", defaults.maxRailsPerScan()),
 					intValue(object, "scanRailsPerTick", defaults.scanRailsPerTick()),
 					intValue(object, "scanTimeBudgetMs", defaults.scanTimeBudgetMs()),
@@ -248,6 +277,7 @@ public record Config(
 		object.addProperty("acceleration", config.acceleration());
 		object.addProperty("braking", config.braking());
 		object.addProperty("safetyMargin", config.safetyMargin());
+		object.addProperty("segmentLength", config.segmentLength());
 		object.addProperty("maxRailsPerScan", config.maxRailsPerScan());
 		object.addProperty("scanRailsPerTick", config.scanRailsPerTick());
 		object.addProperty("scanTimeBudgetMs", config.scanTimeBudgetMs());

@@ -12,7 +12,7 @@ the station exit and the service cart is removed.
 server; no client mod, resource pack, or custom blocks are required.
 
 > **Alpha release.** Test on a backup world. The current version is
-> `0.1.0-alpha.9`.
+> `0.1.0-alpha.10`.
 
 ## Requirements
 
@@ -60,7 +60,7 @@ server; no client mod, resource pack, or custom blocks are required.
 ## Quick start
 
 1. Install Fabric Loader and Fabric API on a Minecraft `26.1.2` server.
-2. Put `railway-0.1.0-alpha.9.jar` in the server `mods/` directory.
+2. Put `railway-0.1.0-alpha.10.jar` in the server `mods/` directory.
 3. Start the server once. Railway creates `config/railway.json`.
 4. Give builders OP level 2, or list their UUIDs in `builders`.
 5. Build a station from vanilla rails, wall signs, and stone buttons.
@@ -159,6 +159,7 @@ Config lives at `config/railway.json`. Important defaults:
 |---|---:|---|
 | `maxActiveTrips` | 8 | Concurrent trips |
 | `maxSpeed` | 12.0 | Target blocks/second, capped at 12 |
+| `segmentLength` | 32 | Reservation segment length in blocks |
 | `boardingRadius` | 4 | Command/legacy boarding radius |
 | `maxManagedChunkTickets` | 128 | Local ticket budget; 0 disables tickets |
 | `maxRouteLength` | 10000 | Maximum graph route length |

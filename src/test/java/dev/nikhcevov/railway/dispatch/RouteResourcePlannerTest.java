@@ -113,6 +113,43 @@ class RouteResourcePlannerTest {
 				RouteResourcePlanner.derive(graph, plan, docks));
 	}
 
+	@Test
+	void scheduleSlicesLongSectionIntoConfigurableSegmentsAndMatchesAcrossDirections() throws Exception {
+		GraphRail[] rails = new GraphRail[40];
+		for (int x = 0; x < rails.length; x++) {
+			rails[x] = fixed(x, 64, 0);
+		}
+		RailGraph graph = graph(rails);
+		BlockLocation start = pos(0, 64, 0);
+		BlockLocation end = pos(39, 64, 0);
+		Set<BlockLocation> docks = Set.of(start, end);
+		GraphRoutePlan forward = plan(graph, start, end);
+		GraphRoutePlan reverse = plan(graph, end, start);
+
+		RouteResourcePlanner.RouteSchedule forwardSchedule = RouteResourcePlanner.planSchedule(
+				graph, forward, docks, 16);
+		RouteResourcePlanner.RouteSchedule reverseSchedule = RouteResourcePlanner.planSchedule(
+				graph, reverse, docks, 16);
+
+		assertEquals(1, forwardSchedule.corridors().size());
+		assertEquals("F", forwardSchedule.corridors().getFirst().direction());
+		assertEquals("R", reverseSchedule.corridors().getFirst().direction());
+		assertEquals(forwardSchedule.corridors().getFirst().key(),
+				reverseSchedule.corridors().getFirst().key());
+
+		List<String> forwardSegments = forwardSchedule.exclusiveSpans().stream()
+				.map(RouteResourcePlanner.ExclusiveSpan::key)
+				.filter(key -> key.startsWith("seg|"))
+				.toList();
+		List<String> reverseSegments = reverseSchedule.exclusiveSpans().stream()
+				.map(RouteResourcePlanner.ExclusiveSpan::key)
+				.filter(key -> key.startsWith("seg|"))
+				.toList();
+		assertEquals(3, forwardSegments.size(), "38 interior rails with segmentLength=16 -> 3 segments (16, 16, 6)");
+		assertEquals(new HashSet<>(forwardSegments), new HashSet<>(reverseSegments),
+				"segment keys must be identical in both travel directions");
+	}
+
 	private static GraphRoutePlan plan(RailGraph graph, BlockLocation from, BlockLocation to) {
 		RailGraphPlanner.Result result = RailGraphPlanner.plan(graph, FROM, TO, from, to, 100);
 		assertTrue(result instanceof RailGraphPlanner.Result.Planned, "expected plan but got " + result);

@@ -87,6 +87,75 @@ public final class ParallelGameTests extends GameTestSupport {
 		});
 	}
 
+	@GameTest(maxTicks = 800)
+	public void secondPlayerBoardsOnceDockClearsAndFollowsSameLine(GameTestHelper helper) {
+		Railway railway = Railway.get();
+		ServerLevel level = helper.getLevel();
+		MinecraftServer server = level.getServer();
+		String unique = Long.toString(System.nanoTime() & 0xFFFFFFL, 36) + "f";
+		String dimension = RailWorld.dimension(level);
+
+		buildLine(helper, 7, 0, 0, 7);
+		BlockLocation button = absolute(helper, 0, 1, 3);
+		level.setBlock(RailWorld.pos(button), Blocks.STONE_BUTTON.defaultBlockState(), 2);
+
+		Station a = station(railway, "fa" + unique, "Follow A " + unique, dimension,
+				absolute(helper, 0, 1, 0), absolute(helper, 0, 1, 2));
+		Station b = station(railway, "fb" + unique, "Follow B " + unique, dimension,
+				absolute(helper, 7, 1, 0), absolute(helper, 7, 1, 2));
+		scan(helper, railway.scans(), a, level, server);
+		scan(helper, railway.scans(), b, level, server);
+
+		ServerPlayer first = helper.makeMockServerPlayerInLevel();
+		first.teleportTo(a.exit().x() + 0.5, a.exit().y(), a.exit().z() + 0.5);
+		ServerPlayer second = helper.makeMockServerPlayerInLevel();
+		second.teleportTo(a.exit().x() + 0.5, a.exit().y(), a.exit().z() + 0.5);
+		Binding binding = new Binding(dimension, button, "minecraft:stone_button", a.id(), b.id());
+
+		TripId[] trips = {null, null};
+		boolean[] overlapped = {false};
+		helper.onEachTick(() -> {
+			if (trips[0] == null) {
+				if (railway.trips().activeCount() > railway.config().maxActiveTrips() - 2) {
+					return;
+				}
+				TripService.StartResult one = railway.trips().start(first, binding);
+				if (one instanceof TripService.StartResult.Rejected rejected) {
+					if (rejected.failure().code() == FailureCode.RECOVERY_PENDING) {
+						return;
+					}
+					throw helper.assertionException("leader trip rejected: " + rejected.failure().code());
+				}
+				trips[0] = ((TripService.StartResult.Started) one).id();
+				return;
+			}
+			if (trips[1] == null) {
+				TripService.StartResult two = railway.trips().start(second, binding);
+				if (two instanceof TripService.StartResult.Started started) {
+					trips[1] = started.id();
+					if (tripActive(railway, trips[0])) {
+						overlapped[0] = true;
+					}
+				}
+				return;
+			}
+			if (tripActive(railway, trips[0]) || tripActive(railway, trips[1])) {
+				return;
+			}
+			if (!overlapped[0]) {
+				throw helper.assertionException("follower did not board while leader trip was still active");
+			}
+			if (!first.blockPosition().equals(RailWorld.pos(b.exit()))) {
+				throw helper.assertionException("leader ended at " + first.blockPosition());
+			}
+			if (!second.blockPosition().equals(RailWorld.pos(b.exit()))) {
+				throw helper.assertionException("follower ended at " + second.blockPosition());
+			}
+			requireNoManagedCart(helper, level);
+			helper.succeed();
+		});
+	}
+
 	private static Station station(Railway railway, String id, String name, String dimension,
 			BlockLocation dock, BlockLocation exit) {
 		Station station = new Station(new StationId(id), name, dimension, dock, exit, 0.0F, true,

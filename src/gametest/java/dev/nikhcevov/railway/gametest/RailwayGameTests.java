@@ -21,6 +21,7 @@ import net.minecraft.gametest.framework.GameTestHelper;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntitySpawnReason;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.vehicle.minecart.Minecart;
@@ -408,7 +409,7 @@ public final class RailwayGameTests extends GameTestSupport {
 			if (!(secondStart instanceof TripService.StartResult.Rejected rejected)) {
 				throw helper.assertionException("second launch unexpectedly succeeded");
 			}
-			Set<FailureCode> expected = Set.of(FailureCode.DOCK_OCCUPIED, FailureCode.PATH_OCCUPIED,
+			Set<FailureCode> expected = Set.of(FailureCode.DOCK_OCCUPIED,
 					FailureCode.RESERVATION_CONFLICT);
 			if (!expected.contains(rejected.failure().code())) {
 				throw helper.assertionException("unexpected rejection: " + rejected.failure().code());
@@ -418,6 +419,35 @@ public final class RailwayGameTests extends GameTestSupport {
 			requireStarted(helper, trip);
 			requireTripFinished(helper, fixture.railway, trip[0]);
 			requireNoManagedCart(helper, fixture.level);
+		});
+	}
+
+	@GameTest(maxTicks = 600)
+	public void entitiesOnLineDoNotBlockOrInterruptTrip(GameTestHelper helper) {
+		Fixture fixture = buildFixture(helper, "ents");
+		ServerLevel level = fixture.level();
+		Entity beforeLaunch = spawnBlocker(helper, level, absolute(helper, 3, 1, 0));
+		ServerPlayer player = fixture.newPlayer(helper, fixture.homeExit);
+		TripId[] trip = {null};
+		Entity[] afterLaunch = {null};
+		startWhenFree(helper, fixture, player, fixture.homeToMine, trip);
+		helper.onEachTick(() -> {
+			if (trip[0] == null || afterLaunch[0] != null) {
+				return;
+			}
+			// Appears after launch, so no preflight check could have seen it.
+			afterLaunch[0] = spawnBlocker(helper, level, absolute(helper, 4, 1, 0));
+		});
+		helper.succeedWhen(() -> {
+			requireStarted(helper, trip);
+			requireTripFinished(helper, fixture.railway(), trip[0]);
+			if (beforeLaunch.isRemoved()) {
+				throw helper.assertionException("pre-launch line blocker was removed");
+			}
+			if (afterLaunch[0] == null || afterLaunch[0].isRemoved()) {
+				throw helper.assertionException("mid-route line blocker was removed or never spawned");
+			}
+			requireNoManagedCart(helper, fixture.level());
 		});
 	}
 
@@ -782,6 +812,19 @@ public final class RailwayGameTests extends GameTestSupport {
 				throw helper.assertionException("trip still active: " + active.phase());
 			}
 		}
+	}
+
+	/** Static living entity on a rail; the service cart must ignore it. */
+	private static Entity spawnBlocker(GameTestHelper helper, ServerLevel level, BlockLocation pos) {
+		Entity entity = EntityType.ARMOR_STAND.create(level, EntitySpawnReason.COMMAND);
+		if (entity == null) {
+			throw helper.assertionException("could not create line blocker");
+		}
+		entity.setPos(pos.x() + 0.5, pos.y(), pos.z() + 0.5);
+		if (!level.addFreshEntity(entity)) {
+			throw helper.assertionException("could not add line blocker");
+		}
+		return entity;
 	}
 
 	/** Builds a disconnected rail line and registers one anchored station on it. */

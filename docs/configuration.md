@@ -30,6 +30,7 @@ no version bump was required.
 | `acceleration` | 4.0 | 0.1..20.0 | Blocks/s² |
 | `braking` | 6.0 | 0.1..20.0 | Blocks/s² |
 | `safetyMargin` | 2.0 | 0.0..10.0 | Extra braking distance/space |
+| `segmentLength` | 32 | 4..1,024 | Exclusive reservation segment length in rail blocks |
 | `maxRailsPerScan` | 50,000 | 1..1,000,000 | Scan budget |
 | `scanRailsPerTick` | 250 | 1..10,000 | Scan work per tick |
 | `scanTimeBudgetMs` | 2 | 1..50 | Scan time budget per tick |
@@ -68,6 +69,7 @@ no version bump was required.
   "acceleration": 4.0,
   "braking": 6.0,
   "safetyMargin": 2.0,
+  "segmentLength": 32,
   "maxRailsPerScan": 50000,
   "scanRailsPerTick": 250,
   "scanTimeBudgetMs": 2,

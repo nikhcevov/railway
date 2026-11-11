@@ -16,8 +16,6 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.Entity;
-import net.minecraft.world.entity.LivingEntity;
-import net.minecraft.world.entity.vehicle.minecart.AbstractMinecart;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.block.BaseRailBlock;
 import net.minecraft.world.level.block.Block;
@@ -198,29 +196,6 @@ public final class RailWorld implements GraphRailView {
 		return null;
 	}
 
-	public boolean isPathOccupied(GraphRoutePlan plan, UUID passengerUuid, UUID cartUuid) {
-		for (RouteStep step : plan.steps()) {
-			BlockPos pos = pos(step.pos());
-			if (!level.isLoaded(pos)) {
-				continue;
-			}
-			AABB box = new AABB(pos.getX() + 0.25, pos.getY() - 0.1, pos.getZ() + 0.25,
-					pos.getX() + 0.75, pos.getY() + 1.5, pos.getZ() + 0.75);
-			if (!level.getEntities((Entity) null, box, entity -> {
-				if (entity.getUUID().equals(passengerUuid)) {
-					return false;
-				}
-				if (entity instanceof AbstractMinecart cart) {
-					return !cart.getUUID().equals(cartUuid);
-				}
-				return entity instanceof LivingEntity;
-			}).isEmpty()) {
-				return true;
-			}
-		}
-		return false;
-	}
-
 	public static RailShape vanillaShape(RailShapeType shape) {
 		return switch (shape) {
 			case NORTH_SOUTH -> RailShape.NORTH_SOUTH;
@@ -301,7 +276,9 @@ public final class RailWorld implements GraphRailView {
 		BlockPos pos = pos(dock);
 		AABB box = new AABB(pos.getX() + 0.1, pos.getY(), pos.getZ() + 0.1,
 				pos.getX() + 0.9, pos.getY() + 1.2, pos.getZ() + 0.9);
-		return level.getEntities((Entity) null, box, entity -> !entity.getUUID().equals(passengerUuid)).isEmpty();
+		return level.getEntities((Entity) null, box,
+				entity -> entity instanceof net.minecraft.world.entity.vehicle.VehicleEntity
+						&& !entity.getUUID().equals(passengerUuid)).isEmpty();
 	}
 
 	public static AABB allEntities() {

@@ -77,21 +77,29 @@ public final class TripService {
 		final Minecart cart;
 		final RailWorld world;
 		final GraphRoutePlan plan;
+		final RouteResourcePlanner.RouteSchedule schedule;
 		final BlockLocation arrivalExit;
 		final float arrivalYaw;
 		final MotionProfile profile;
 		final Map<BlockLocation, RailShapeType> requiredSwitches;
 		final Set<BlockLocation> preparedSwitches = new LinkedHashSet<>();
+		final Set<String> heldExclusive = new LinkedHashSet<>();
+		final Set<String> heldCorridors = new LinkedHashSet<>();
 		final List<BlockLocation> route;
 		final Set<ChunkWindow.Key> routeChunks;
 		final double safetyMargin;
+		final int segmentLength;
+		final int initialLookaheadSteps;
 		final long graphRevision;
 		final int maxTripTicks;
 		final int maxChunkTickets;
 		final long departureTick;
+		boolean initialResourcesAcquired;
 		double speed;
 		int stepIndex;
 		long lastWarningTick;
+		long lastWaitStatusTick = -1;
+		int lastWaitEtaSeconds = -1;
 		long lastSafeRetryTick;
 		long lastProgressTick;
 		long chunkWaitSinceTick = -1;
@@ -104,17 +112,21 @@ public final class TripService {
 		TripPhase lastCheckpointPhase;
 
 		ActiveTrip(Trip trip, Minecart cart, RailWorld world, GraphRoutePlan plan,
+				RouteResourcePlanner.RouteSchedule schedule,
 				BlockLocation arrivalExit, float arrivalYaw, MotionProfile profile,
-				double safetyMargin, long graphRevision, int maxTripTicks, long departureTick,
-				int maxChunkTickets) {
+				double safetyMargin, int segmentLength, long graphRevision, int maxTripTicks,
+				long departureTick, int maxChunkTickets) {
 			this.trip = trip;
 			this.cart = cart;
 			this.world = world;
 			this.plan = plan;
+			this.schedule = schedule;
 			this.arrivalExit = arrivalExit;
 			this.arrivalYaw = arrivalYaw;
 			this.profile = profile;
 			this.safetyMargin = safetyMargin;
+			this.segmentLength = Math.max(4, segmentLength);
+			this.initialLookaheadSteps = Math.min(plan.steps().size() - 1, this.segmentLength);
 			this.graphRevision = graphRevision;
 			this.maxTripTicks = maxTripTicks;
 			this.departureTick = departureTick;
@@ -312,10 +324,6 @@ public final class TripService {
 		if (world.isLoaded(arrivalExit) && !world.isSafeStand(arrivalExit)) {
 			return reject(Failure.at(FailureCode.EXIT_UNSAFE, arrivalExit));
 		}
-		if (world.isPathOccupied(plan, player.getUUID(), new UUID(0L, 0L))) {
-			return reject(FailureCode.PATH_OCCUPIED, null);
-		}
-
 		TripId tripId = TripId.random();
 		java.util.Set<BlockLocation> docks = new java.util.HashSet<>();
 		for (Station station : railway.state().stations()) {
@@ -331,17 +339,25 @@ public final class TripService {
 				docks.add(other.sourceDock());
 			}
 		}
-		List<String> resources = RouteResourcePlanner.derive(fromGraph, plan, docks);
-		String blocked = null;
-		for (String resource : resources) {
-			if (!reservations.isFree(resource)) {
-				blocked = resource;
-				break;
+		RouteResourcePlanner.RouteSchedule schedule = RouteResourcePlanner.planSchedule(
+				fromGraph, plan, docks, config.segmentLength());
+		for (RouteResourcePlanner.CorridorSpan corridor : schedule.corridors()) {
+			if (reservations.isQuarantined(corridor.key())) {
+				return reject(Failure.detail(FailureCode.RESERVATION_CONFLICT, corridor.key()));
 			}
 		}
-		if (blocked != null || !reservations.tryAcquire(resources, tripId.value())) {
-			return reject(Failure.detail(FailureCode.RESERVATION_CONFLICT,
-					blocked == null ? "resource conflict" : blocked));
+		for (RouteResourcePlanner.ExclusiveSpan span : schedule.exclusiveSpans()) {
+			if (reservations.isQuarantined(span.key())) {
+				return reject(Failure.detail(FailureCode.RESERVATION_CONFLICT, span.key()));
+			}
+		}
+		for (ActiveTrip other : active.values()) {
+			if (other.plan.toDock().equals(plan.fromDock())) {
+				return reject(Failure.detail(FailureCode.RESERVATION_CONFLICT, schedule.departurePlatformKey()));
+			}
+		}
+		if (!reservations.tryAcquire(List.of(schedule.departurePlatformKey()), tripId.value())) {
+			return reject(Failure.detail(FailureCode.RESERVATION_CONFLICT, schedule.departurePlatformKey()));
 		}
 
 		Minecart cart = null;
@@ -365,14 +381,23 @@ public final class TripService {
 					config.braking(),
 					0.1
 			);
-			ActiveTrip activeTrip = new ActiveTrip(trip, cart, world, plan, arrivalExit, arrivalYaw,
-					profile, config.safetyMargin(), fromGraph.revision(), config.maxTripTicks(),
-					tick + config.boardingDelayTicks(), config.maxManagedChunkTickets());
-			Failure switchFailure = prepareLoadedSwitches(activeTrip);
-			if (switchFailure != null) {
+			ActiveTrip activeTrip = new ActiveTrip(trip, cart, world, plan, schedule, arrivalExit, arrivalYaw,
+					profile, config.safetyMargin(), config.segmentLength(), fromGraph.revision(),
+					config.maxTripTicks(), tick + config.boardingDelayTicks(), config.maxManagedChunkTickets());
+			activeTrip.heldExclusive.add(schedule.departurePlatformKey());
+			Failure initialAcquireFailure = tryAcquireInitialResources(activeTrip);
+			if (initialAcquireFailure != null) {
 				PlayerActions.discardCart(cart);
 				reservations.releaseAll(tripId.value());
-				return reject(switchFailure);
+				return reject(initialAcquireFailure);
+			}
+			if (activeTrip.initialResourcesAcquired) {
+				Failure switchFailure = prepareLoadedSwitches(activeTrip);
+				if (switchFailure != null) {
+					PlayerActions.discardCart(cart);
+					reservations.releaseAll(tripId.value());
+					return reject(switchFailure);
+				}
 			}
 			Failure ticketFailure = updateChunkTickets(activeTrip);
 			if (ticketFailure != null) {
@@ -408,7 +433,11 @@ public final class TripService {
 					.field("speed", String.format(Locale.ROOT, "%.2f", config.effectiveSpeed()))
 					.field("maxTripTicks", config.maxTripTicks())
 					.info(logger);
-			Messages.actionBar(player, "actionbar.boarding");
+			if (activeTrip.initialResourcesAcquired) {
+				Messages.actionBar(player, "actionbar.boarding");
+			} else {
+				updateBoardingWaitMessage(activeTrip, player, tick, true);
+			}
 			return new StartResult.Started(tripId);
 		} catch (RuntimeException e) {
 			if (cart != null) {
@@ -610,6 +639,18 @@ public final class TripService {
 					abort(at, tick, ticketFailure);
 					return;
 				}
+				if (!at.initialResourcesAcquired) {
+					Failure acquireFailure = tryAcquireInitialResources(at);
+					if (acquireFailure != null) {
+						abort(at, tick, acquireFailure);
+						return;
+					}
+					if (!at.initialResourcesAcquired) {
+						at.lastProgressTick = tick;
+						updateBoardingWaitMessage(at, player, tick, false);
+						return;
+					}
+				}
 				if (tick >= at.departureTick) {
 					Failure ready = at.world.validateGraphRoute(at.plan);
 					if (ready == null) {
@@ -659,6 +700,13 @@ public final class TripService {
 			at.stepIndex = found;
 			current = at.plan.steps().get(at.stepIndex);
 		}
+		releasePassedResources(at);
+		LookaheadResult lookahead = acquireLookaheadResources(at);
+		if (lookahead.failure() != null) {
+			abort(at, tick, lookahead.failure());
+			return;
+		}
+		int maxAuthorizedStep = lookahead.maxAuthorizedStep();
 
 		RouteStep next = at.stepIndex + 1 < at.plan.steps().size()
 				? at.plan.steps().get(at.stepIndex + 1) : null;
@@ -688,7 +736,7 @@ public final class TripService {
 		}
 		at.chunkWaitSinceTick = -1;
 
-		Failure upcomingFailure = ensureUpcomingSwitches(at);
+		Failure upcomingFailure = ensureUpcomingSwitches(at, maxAuthorizedStep);
 		if (upcomingFailure != null) {
 			abort(at, tick, upcomingFailure);
 			return;
@@ -698,7 +746,7 @@ public final class TripService {
 			abort(at, tick, currentFailure);
 			return;
 		}
-		if (next != null) {
+		if (next != null && at.stepIndex + 1 <= maxAuthorizedStep) {
 			Failure nextFailure = ensureStepShape(at, next, false);
 			if (nextFailure != null) {
 				abort(at, tick, nextFailure);
@@ -712,13 +760,30 @@ public final class TripService {
 			at.lastX = cart.getX();
 			at.lastZ = cart.getZ();
 		}
+		int lastStep = at.plan.steps().size() - 1;
 		double remaining = remaining(at, cart);
+		double authorizedRemaining = maxAuthorizedStep < lastStep
+				? remainingToStep(at, cart, maxAuthorizedStep) : remaining;
+		if (maxAuthorizedStep < lastStep && authorizedRemaining <= STOP_DISTANCE) {
+			cart.setDeltaMovement(Vec3.ZERO);
+			at.speed = 0;
+			at.lastProgressTick = tick;
+			if ( lookahead.blockedKey() != null ) {
+				int eta = estimateExclusiveEtaSeconds(at, lookahead.blockedKey(), tick);
+				if (eta != at.lastWaitEtaSeconds || tick - at.lastWaitStatusTick >= 20) {
+					at.lastWaitEtaSeconds = eta;
+					at.lastWaitStatusTick = tick;
+					Messages.actionBar(player, "actionbar.holding_ahead", eta);
+				}
+			}
+			return;
+		}
 		if (tick - at.lastProgressTick > 40 && remaining > STOP_DISTANCE) {
 			abort(at, tick, Failure.detail(FailureCode.INTERNAL, "cart made no progress"));
 			return;
 		}
 
-		if (at.stepIndex == at.plan.steps().size() - 1) {
+		if (at.stepIndex == lastStep && maxAuthorizedStep == lastStep) {
 			if (remaining < -0.3) {
 				abort(at, tick, Failure.detail(FailureCode.INTERNAL, "passed destination dock"));
 				return;
@@ -741,7 +806,7 @@ public final class TripService {
 		if (next != null) {
 			limit = Math.min(limit, speedLimit(at, next));
 		}
-		double target = Math.min(at.profile.targetSpeed(remaining), limit);
+		double target = Math.min(at.profile.targetSpeed(authorizedRemaining), limit);
 		at.speed = at.profile.step(at.speed, target);
 		applyVelocity(at, cart, current, next);
 	}
@@ -800,13 +865,188 @@ public final class TripService {
 				&& Math.abs(cartBlock.y() - step.pos().y()) <= 1;
 	}
 
-	private Failure ensureUpcomingSwitches(ActiveTrip at) {
+	private record LookaheadResult(int maxAuthorizedStep, String blockedKey, Failure failure) {
+	}
+
+	private Failure tryAcquireInitialResources(ActiveTrip at) {
+		List<ReservationManager.CorridorRequest> corridorRequests = new ArrayList<>(at.schedule.corridors().size());
+		for (RouteResourcePlanner.CorridorSpan corridor : at.schedule.corridors()) {
+			if (reservations.isQuarantined(corridor.key())) {
+				return Failure.detail(FailureCode.RESERVATION_CONFLICT, corridor.key());
+			}
+			corridorRequests.add(new ReservationManager.CorridorRequest(corridor.key(), corridor.direction()));
+		}
+		List<String> initialExclusive = new ArrayList<>();
+		for (RouteResourcePlanner.ExclusiveSpan span : at.schedule.exclusiveSpans()) {
+			if (span.startStep() > at.initialLookaheadSteps) {
+				break;
+			}
+			if (reservations.isQuarantined(span.key())) {
+				return Failure.detail(FailureCode.RESERVATION_CONFLICT, span.key());
+			}
+			initialExclusive.add(span.key());
+		}
+		if (reservations.tryAcquire(initialExclusive, corridorRequests, at.trip.id().value())) {
+			at.heldExclusive.addAll(initialExclusive);
+			for (ReservationManager.CorridorRequest req : corridorRequests) {
+				at.heldCorridors.add(req.resource());
+			}
+			at.initialResourcesAcquired = true;
+		}
+		return null;
+	}
+
+	private void releasePassedResources(ActiveTrip at) {
+		UUID tripUuid = at.trip.id().value();
+		for (String key : List.copyOf(at.heldExclusive)) {
+			boolean stillNeeded = false;
+			for (RouteResourcePlanner.ExclusiveSpan span : at.schedule.exclusiveSpans()) {
+				if (span.key().equals(key) && at.stepIndex <= span.endStep()) {
+					stillNeeded = true;
+					break;
+				}
+			}
+			if (!stillNeeded) {
+				reservations.release(key, tripUuid);
+				at.heldExclusive.remove(key);
+			}
+		}
+		for (String key : List.copyOf(at.heldCorridors)) {
+			boolean stillNeeded = false;
+			for (RouteResourcePlanner.CorridorSpan corridor : at.schedule.corridors()) {
+				if (corridor.key().equals(key) && at.stepIndex <= corridor.endStep()) {
+					stillNeeded = true;
+					break;
+				}
+			}
+			if (!stillNeeded) {
+				reservations.release(key, tripUuid);
+				at.heldCorridors.remove(key);
+			}
+		}
+	}
+
+	private LookaheadResult acquireLookaheadResources(ActiveTrip at) {
+		int lookaheadSteps = Math.max(at.segmentLength,
+				(int) Math.ceil(at.profile.brakingDistance(at.speed) + at.safetyMargin) + 2);
+		int maxStep = at.plan.steps().size() - 1;
+		String blockedKey = null;
+		UUID tripUuid = at.trip.id().value();
+		for (RouteResourcePlanner.ExclusiveSpan span : at.schedule.exclusiveSpans()) {
+			if (span.endStep() < at.stepIndex) {
+				continue;
+			}
+			if (span.startStep() > at.stepIndex + lookaheadSteps) {
+				break;
+			}
+			if (at.heldExclusive.contains(span.key())) {
+				continue;
+			}
+			if (reservations.isQuarantined(span.key())) {
+				return new LookaheadResult(at.stepIndex, span.key(),
+						Failure.detail(FailureCode.RESERVATION_CONFLICT, span.key()));
+			}
+			if (reservations.tryAcquire(List.of(span.key()), tripUuid)) {
+				at.heldExclusive.add(span.key());
+			} else {
+				maxStep = Math.min(maxStep, Math.max(at.stepIndex, span.startStep() - 1));
+				blockedKey = span.key();
+				break;
+			}
+		}
+		return new LookaheadResult(maxStep, blockedKey, null);
+	}
+
+	private void updateBoardingWaitMessage(ActiveTrip at, ServerPlayer player, long tick, boolean force) {
+		UUID selfUuid = at.trip.id().value();
+		for (RouteResourcePlanner.CorridorSpan corridor : at.schedule.corridors()) {
+			if (!reservations.isCorridorCompatible(corridor.key(), corridor.direction(), selfUuid)) {
+				int eta = estimateCorridorEtaSeconds(corridor.key(), tick);
+				if (force || eta != at.lastWaitEtaSeconds || tick - at.lastWaitStatusTick >= 20) {
+					at.lastWaitEtaSeconds = eta;
+					at.lastWaitStatusTick = tick;
+					Messages.actionBar(player, "actionbar.waiting_oncoming", eta);
+				}
+				return;
+			}
+		}
+		for (RouteResourcePlanner.ExclusiveSpan span : at.schedule.exclusiveSpans()) {
+			if (span.startStep() > at.initialLookaheadSteps) {
+				break;
+			}
+			if (!reservations.canAcquireExclusive(span.key(), selfUuid)) {
+				int eta = estimateExclusiveEtaSeconds(at, span.key(), tick);
+				if (force || eta != at.lastWaitEtaSeconds || tick - at.lastWaitStatusTick >= 20) {
+					at.lastWaitEtaSeconds = eta;
+					at.lastWaitStatusTick = tick;
+					Messages.actionBar(player, "actionbar.waiting_ahead", eta);
+				}
+				return;
+			}
+		}
+	}
+
+	private int estimateCorridorEtaSeconds(String corridorKey, long tick) {
+		int maxSeconds = 1;
+		for (UUID ownerUuid : reservations.corridorOwners(corridorKey)) {
+			ActiveTrip blocker = active.get(new TripId(ownerUuid));
+			if (blocker == null) {
+				continue;
+			}
+			int clearStep = blocker.plan.steps().size() - 1;
+			for (RouteResourcePlanner.CorridorSpan c : blocker.schedule.corridors()) {
+				if (c.key().equals(corridorKey)) {
+					clearStep = Math.max(clearStep, c.endStep() + 1);
+				}
+			}
+			maxSeconds = Math.max(maxSeconds, estimateStepsEtaSeconds(blocker, clearStep, tick));
+		}
+		return maxSeconds;
+	}
+
+	private int estimateExclusiveEtaSeconds(ActiveTrip waiter, String resourceKey, long tick) {
+		UUID ownerUuid = reservations.ownerOf(resourceKey);
+		if (ownerUuid == null) {
+			return 1;
+		}
+		ActiveTrip blocker = active.get(new TripId(ownerUuid));
+		if (blocker == null) {
+			return 1;
+		}
+		int clearStep = blocker.stepIndex + 1;
+		for (RouteResourcePlanner.ExclusiveSpan span : blocker.schedule.exclusiveSpans()) {
+			if (span.key().equals(resourceKey) && span.endStep() >= blocker.stepIndex) {
+				clearStep = span.endStep() + 1;
+				break;
+			}
+		}
+		return estimateStepsEtaSeconds(blocker, clearStep, tick);
+	}
+
+	private static int estimateStepsEtaSeconds(ActiveTrip blocker, int clearStep, long tick) {
+		int remainingSteps = Math.max(1, clearStep - blocker.stepIndex);
+		double effectiveSpeed = blocker.speed > 1.0
+				? blocker.speed
+				: Math.max(4.0, blocker.profile.maxSpeed() * 0.7);
+		double travelSeconds = remainingSteps / effectiveSpeed;
+		if (blocker.trip.phase() == TripPhase.BOARDING && blocker.departureTick > tick) {
+			travelSeconds += (blocker.departureTick - tick) / 20.0;
+		}
+		return Math.max(1, (int) Math.ceil(travelSeconds));
+	}
+
+	private boolean ownsSwitchZone(ActiveTrip at, BlockLocation switchPos) {
+		return at.heldExclusive.contains(RouteResourcePlanner.switchZoneKey(at.plan.dimension(), switchPos));
+	}
+
+	private Failure ensureUpcomingSwitches(ActiveTrip at, int maxAuthorizedStep) {
 		int lookahead = (int) Math.ceil(at.profile.brakingDistance(at.speed) + at.safetyMargin) + 1;
-		int last = Math.min(at.plan.steps().size() - 1, at.stepIndex + lookahead);
+		int last = Math.min(maxAuthorizedStep,
+				Math.min(at.plan.steps().size() - 1, at.stepIndex + lookahead));
 		for (int i = at.stepIndex; i <= last; i++) {
 			RouteStep step = at.plan.steps().get(i);
 			RailShapeType required = at.requiredSwitches.get(step.pos());
-			if (required == null || !at.world.isLoaded(step.pos())) {
+			if (required == null || !at.world.isLoaded(step.pos()) || !ownsSwitchZone(at, step.pos())) {
 				continue;
 			}
 			Failure failure = ensureSwitch(at, step.pos(), required);
@@ -818,8 +1058,8 @@ public final class TripService {
 	}
 
 	/**
-	 * Prepares a turnout the first time its chunk is loaded, then keeps checking
-	 * it so an external shape change still aborts the trip.
+	 * Prepares a turnout the first time its chunk is loaded and owned, then keeps
+	 * checking it so an external shape change still aborts the trip.
 	 */
 	private Failure ensureSwitch(ActiveTrip at, BlockLocation pos, RailShapeType required) {
 		if (!at.preparedSwitches.contains(pos)) {
@@ -836,9 +1076,12 @@ public final class TripService {
 		return null;
 	}
 
-	/** Applies every switch whose chunk is loaded now; the rest wait for their chunk. */
+	/** Applies every owned switch whose chunk is loaded now; the rest wait for ownership/chunk. */
 	private Failure prepareLoadedSwitches(ActiveTrip at) {
 		for (SwitchRequirement requirement : LaunchCheck.loadedSwitches(at.plan, at.world::isLoaded)) {
+			if (!ownsSwitchZone(at, requirement.pos())) {
+				continue;
+			}
 			Failure failure = ensureSwitch(at, requirement.pos(), requirement.requiredShape());
 			if (failure != null) {
 				return failure;
@@ -848,12 +1091,15 @@ public final class TripService {
 	}
 
 	private Failure ensureStepShape(ActiveTrip at, RouteStep step, boolean current) {
+		if (!current && at.requiredSwitches.containsKey(step.pos()) && !ownsSwitchZone(at, step.pos())) {
+			return null;
+		}
 		RailShapeType required = at.requiredSwitches.getOrDefault(step.pos(), step.shape());
 		RailShapeType actual = at.world.shapeAt(step.pos());
 		if (actual == required) {
 			return null;
 		}
-		// Turnouts are set before departure. Any later change is external and must
+		// Turnouts are set before entry. Any later change is external and must
 		// stop the trip at the conflict zone rather than being silently rewritten.
 		return Failure.at(FailureCode.UNSUPPORTED_GEOMETRY, step.pos(), "rail shape changed");
 	}
@@ -887,15 +1133,20 @@ public final class TripService {
 	}
 
 	private double remaining(ActiveTrip at, Minecart cart) {
-		int last = at.plan.steps().size() - 1;
-		if (at.stepIndex >= last) {
-			return horizontalDistance(cart.getX(), cart.getZ(), at.plan.toDock().x() + 0.5,
-					at.plan.toDock().z() + 0.5);
+		return remainingToStep(at, cart, at.plan.steps().size() - 1);
+	}
+
+	private double remainingToStep(ActiveTrip at, Minecart cart, int targetStep) {
+		int clampedTarget = Math.min(at.plan.steps().size() - 1, Math.max(0, targetStep));
+		BlockLocation targetPos = at.plan.steps().get(clampedTarget).pos();
+		if (at.stepIndex >= clampedTarget) {
+			return horizontalDistance(cart.getX(), cart.getZ(), targetPos.x() + 0.5,
+					targetPos.z() + 0.5);
 		}
 		RouteStep next = at.plan.steps().get(at.stepIndex + 1);
 		double distanceToNext = horizontalDistance(cart.getX(), cart.getZ(),
 				next.pos().x() + 0.5, next.pos().z() + 0.5);
-		double transitions = last - at.stepIndex;
+		double transitions = clampedTarget - at.stepIndex;
 		double covered = 1.0 - Math.min(1.0, distanceToNext);
 		return Math.max(0.0, transitions - covered);
 	}

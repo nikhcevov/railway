@@ -7,7 +7,9 @@
 		"LevelMixin",
 		"NewMinecartBehaviorMixin",
 		"MinecartBehaviorAccessor",
-		"SignBlockEntityMixin"
+		"SignBlockEntityMixin",
+		"AbstractMinecartCollisionMixin",
+		"VehicleEntityDamageMixin"
 	],
 	"injectors": {
 		"defaultRequire": 1

@@ -191,8 +191,7 @@ Recovery tickets and state are reported by `/rail diagnostics`.
 ## Reservations and quarantine
 
 - Route resources are acquired atomically before spawn; no waiting queue.
-- A blocked resource returns `PATH_OCCUPIED`, `RESERVATION_CONFLICT`, or
-  `DOCK_OCCUPIED`.
+- A blocked resource returns `DOCK_OCCUPIED` or `RESERVATION_CONFLICT`.
 - If a service cart's removal cannot be confirmed, the trip's resources enter
   quarantine. They stay unavailable until reconciliation by cart UUID confirms
   the cart is gone.
@@ -213,7 +212,7 @@ Recovery tickets and state are reported by `/rail diagnostics`.
 | `NO_PATH` | Graph disconnected or different revisions; rescan |
 | `BUTTON_REPLACED` | Re-register the sign/button |
 | `PLAYER_TOO_FAR` | Move within the sign/main boarding envelope |
-| `DOCK_OCCUPIED` / `PATH_OCCUPIED` / `RESERVATION_CONFLICT` | Another trip owns the resource; retry |
+| `DOCK_OCCUPIED` / `RESERVATION_CONFLICT` | Another trip owns the resource; retry |
 | `EXIT_UNSAFE` | Set a safe platform exit |
 | `TRIP_LIMIT` | Raise `maxActiveTrips` or wait |
 | `CHUNKS_NOT_READY` | Ticket window did not become entity-ticking in time |

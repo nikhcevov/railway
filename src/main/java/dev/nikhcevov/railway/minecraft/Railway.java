@@ -156,6 +156,7 @@ public final class Railway {
 				.field("maxManagedChunkTickets", config.maxManagedChunkTickets())
 				.field("maxRailsPerScan", config.maxRailsPerScan())
 				.field("maxRouteLength", config.maxRouteLength())
+				.field("segmentLength", config.segmentLength())
 				.field("scanRailsPerTick", config.scanRailsPerTick())
 				.field("scanTimeBudgetMs", config.scanTimeBudgetMs())
 				.field("speed", String.valueOf(config.effectiveSpeed()))

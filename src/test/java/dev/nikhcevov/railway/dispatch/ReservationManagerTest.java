@@ -148,4 +148,30 @@ class ReservationManagerTest {
 		assertEquals(0, manager.ownedCount(BETA));
 		assertEquals(2, manager.ownedCount(ALPHA));
 	}
+
+	@Test
+	void directionalCorridorAllowsSameDirectionAndBlocksOppositeUntilAllRelease() {
+		ReservationManager manager = new ReservationManager();
+		List<ReservationManager.CorridorRequest> forward = List.of(
+				new ReservationManager.CorridorRequest("sec|main", "F"));
+		List<ReservationManager.CorridorRequest> reverse = List.of(
+				new ReservationManager.CorridorRequest("sec|main", "R"));
+
+		assertTrue(manager.tryAcquire(List.of("seg|0"), forward, ALPHA));
+		assertTrue(manager.tryAcquire(List.of("seg|1"), forward, BETA),
+				"a second trip in the same corridor direction with a free segment must succeed");
+		assertFalse(manager.tryAcquire(List.of("seg|2"), reverse, GAMMA),
+				"an opposing trip must be blocked while the corridor is active");
+		assertEquals(2, manager.corridorOwners("sec|main").size());
+		assertEquals("F", manager.corridorDirection("sec|main"));
+
+		manager.release("sec|main", ALPHA);
+		assertFalse(manager.tryAcquire(List.of("seg|2"), reverse, GAMMA),
+				"corridor must stay locked while BETA still holds it");
+
+		manager.release("sec|main", BETA);
+		assertTrue(manager.tryAcquire(List.of("seg|2"), reverse, GAMMA),
+				"corridor must flip direction once all forward trips release it");
+		assertEquals("R", manager.corridorDirection("sec|main"));
+	}
 }

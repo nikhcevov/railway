@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.1.0-alpha.10 — 2026-11-11
+
+- Routes no longer lock the entire line from departure to arrival. Track
+  sections (`sec|...`) now use shared-direction corridor leases (preventing
+  head-on single-track deadlocks while allowing multiple carts in the same
+  direction) combined with rolling exclusive `seg|...` segments, switch conflict
+  zones, and platform locks.
+- New `segmentLength` configuration key (default `32`, valid range `4..1024`)
+  controls the exclusive reservation segment length in rail blocks.
+- Once a departing cart clears the departure dock (`stepIndex >= 2`), the next
+  passenger can press the button, board their service cart immediately, and wait
+  in `BOARDING` with a live actionbar countdown (`actionbar.waiting_ahead` /
+  `actionbar.waiting_oncoming`) until the initial segment clears.
+- Turnouts are only prepared and enforced once a trip owns their `swz|...`
+  conflict zone, and standing players near a dock no longer trigger
+  `DOCK_OCCUPIED`.
+- A hit on an occupied service cart no longer destroys it. The cart ignores
+  damage, so the passenger keeps the trip and no minecart item is dropped or
+  picked up; ordinary carts keep vanilla damage and drops.
+- Explosions no longer damage or move a service cart. Blast damage to rails
+  still invalidates the route and aborts the trip; the passenger still takes
+  explosion damage, and ordinary carts keep vanilla explosion behaviour.
+- Starting a trip no longer fails because a mob, animal, player or another cart
+  is somewhere on the loaded route. A service cart ignores entity collisions:
+  it is not pushable, does not push mobs/players/other carts, and passes through
+  them. Broken or blocked rails still stop and abort the trip, and ordinary
+  carts keep vanilla collision behaviour.
+
 ## 0.1.0-alpha.9 — 2026-11-08
 
 - Removing the anchor or main sign no longer leaves the station pointing at the

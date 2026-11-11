@@ -13,7 +13,8 @@
 			"dev.nikhcevov.railway.gametest.SignGameTests",
 			"dev.nikhcevov.railway.gametest.ChunkTicketGameTests",
 			"dev.nikhcevov.railway.gametest.RecoveryGameTests",
-			"dev.nikhcevov.railway.gametest.ArrivalGameTests"
+			"dev.nikhcevov.railway.gametest.ArrivalGameTests",
+			"dev.nikhcevov.railway.gametest.DamageGameTests"
 		]
 	},
 	"depends": {

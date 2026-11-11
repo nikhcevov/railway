@@ -319,7 +319,7 @@ use the `mine` main arrival. Remove the platform to restore the main fallback:
 | `DOCK_NOT_ON_LINE` / `NO_PATH` | Dock/graph mismatch or disconnected network |
 | `BUTTON_REPLACED` | Re-register the button/sign; the block was replaced |
 | `PLAYER_TOO_FAR` | Move within the sign/main boarding envelope |
-| `DOCK_OCCUPIED` / `PATH_OCCUPIED` / `RESERVATION_CONFLICT` | Another trip owns a resource; retry later |
+| `DOCK_OCCUPIED` / `RESERVATION_CONFLICT` | Another trip owns a resource; retry later |
 | `EXIT_UNSAFE` | Choose a safe platform exit and re-enable |
 | `TRIP_LIMIT` | Raise `maxActiveTrips` or wait |
 | `CHUNKS_NOT_READY` | Chunk window did not become entity-ticking; inspect diagnostics/tickets |

@@ -237,7 +237,7 @@ public final class TurnoutGameTests extends GameTestSupport {
 				if (!(second instanceof TripService.StartResult.Rejected rejected)) {
 					throw helper.assertionException("second trip unexpectedly started");
 				}
-				Set<FailureCode> expected = Set.of(FailureCode.DOCK_OCCUPIED, FailureCode.PATH_OCCUPIED,
+				Set<FailureCode> expected = Set.of(FailureCode.DOCK_OCCUPIED,
 						FailureCode.RESERVATION_CONFLICT);
 				if (!expected.contains(rejected.failure().code())) {
 					throw helper.assertionException("unexpected second rejection: " + rejected.failure().code());
